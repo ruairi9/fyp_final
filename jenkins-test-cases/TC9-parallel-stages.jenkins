@@ -1,0 +1,23 @@
+pipeline {
+    agent any
+    stages {
+        stage('Parallel Execution') {
+            parallel {
+                stage('Branch A') {
+                    steps {
+                        echo 'Running parallel branch A'
+                        sleep 5
+                        echo 'Branch A complete'
+                    }
+                }
+                stage('Branch B') {
+                    steps {
+                        echo 'Running parallel branch B'
+                        sleep 5
+                        echo 'Branch B complete'
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+.vagrant
+*.log
+templates/
+static/
+README.md

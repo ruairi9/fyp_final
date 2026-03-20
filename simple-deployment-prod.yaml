@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-microservice
+  namespace: production
+  labels:
+    app: test-microservice
+    environment: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: test-microservice
+  template:
+    metadata:
+      labels:
+        app: test-microservice
+        environment: production
+    spec:
+      nodeSelector:
+        node-role: production
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-microservice
+  namespace: production
+spec:
+  type: NodePort
+  selector:
+    app: test-microservice
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 31501
+    name: http

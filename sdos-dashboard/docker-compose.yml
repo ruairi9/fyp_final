@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  sdos-dashboard:
+    build: .
+    container_name: sdos-dashboard
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../k3s.yaml:/root/fyp-cluster/k3s.yaml:ro
+    network_mode: host
+    restart: unless-stopped

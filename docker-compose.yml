@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  sdos:
+    build: .
+    container_name: sdos-dashboard
+    restart: unless-stopped
+    ports:
+      - "5000:5000"   # Home
+      - "8080:8080"   # Cluster Dashboard
+      - "9000:9000"   # Server Dashboard
+      - "7000:7000"   # Pipeline Dashboard
+      - "6001:6001"   # Developer Workspace
+    volumes:
+      # Mount k3s kubeconfig so dashboard can talk to the cluster
+      - ./k3s.yaml:/app/k3s.yaml:ro
+      # Mount vagrant dir so server_dashboard can SSH into VMs
+      - ~/.vagrant.d:/root/.vagrant.d:ro
+      - ./:/app/cluster:ro
+      # Persist pipeline mappings and repo data between restarts
+      - sdos-data:/app/data
+    environment:
+      - KUBECONFIG=/app/k3s.yaml
+    network_mode: host   # needed so container can reach 192.168.121.x VM IPs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  sdos-data:

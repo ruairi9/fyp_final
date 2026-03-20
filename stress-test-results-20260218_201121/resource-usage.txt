@@ -1,0 +1,4 @@
+NAME                            CPU(cores)   MEMORY(bytes)   
+user-code-api-7985687c6-t76wl   4m           5Mi             
+user-code-api-7985687c6-v89n7   3m           5Mi             
+user-code-api-7985687c6-x2pmf   3m           5Mi             

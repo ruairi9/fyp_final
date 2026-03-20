@@ -1,0 +1,989 @@
+from flask import Flask, render_template_string, jsonify, request, session
+import signal
+import sys
+import logging
+import os
+import subprocess
+import json
+import base64
+import secrets
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)
+
+def signal_handler(sig, frame):
+    print('\n\n' + '='*60)
+    print('Developer Workspace stopped')
+    print('='*60)
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+CODE_BASE_PATH = os.path.expanduser('~/fyp-cluster')
+
+def get_github_files(token, owner, repo):
+    """Get files from GitHub repository"""
+    import urllib.request
+    import urllib.error
+    
+    files = []
+    try:
+        url = f'https://api.github.com/repos/{owner}/{repo}/contents'
+        
+        req = urllib.request.Request(url)
+        req.add_header('Authorization', f'token {token}')
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            
+            for item in data:
+                if item['type'] == 'file':
+                    name = item['name']
+                    if name.endswith(('.py', '.yaml', '.yml', '.sh', '.json')):
+                        files.append({
+                            'name': name,
+                            'path': item['path'],
+                            'repo': f'{owner}/{repo}',
+                            'sha': item['sha']
+                        })
+        
+        return {'files': files, 'source': 'github'}
+    
+    except Exception as e:
+        return {'error': str(e), 'files': []}
+
+def get_local_files():
+    """Get files from local filesystem"""
+    files = []
+    try:
+        for root, dirs, filenames in os.walk(CODE_BASE_PATH):
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+            
+            for filename in filenames:
+                if filename.endswith(('.py', '.yaml', '.yml', '.sh', '.json')):
+                    filepath = os.path.join(root, filename)
+                    rel_path = filepath.replace(CODE_BASE_PATH + '/', '')
+                    files.append({
+                        'path': filepath,
+                        'name': rel_path,
+                        'type': 'local'
+                    })
+    
+    except Exception as e:
+        print(f"Error getting local files: {e}")
+    
+    return {'files': files, 'source': 'local'}
+
+def load_github_file(token, owner, repo, path):
+    """Load file content from GitHub"""
+    import urllib.request
+    
+    try:
+        url = f'https://api.github.com/repos/{owner}/{repo}/contents/{path}'
+        
+        req = urllib.request.Request(url)
+        req.add_header('Authorization', f'token {token}')
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            content = base64.b64decode(data['content']).decode('utf-8')
+            
+            return {
+                'content': content,
+                'sha': data['sha'],
+                'source': 'github'
+            }
+    
+    except Exception as e:
+        return {'error': str(e)}
+
+def save_github_file(token, owner, repo, path, content, sha):
+    """Save file to GitHub"""
+    import urllib.request
+    
+    try:
+        url = f'https://api.github.com/repos/{owner}/{repo}/contents/{path}'
+        
+        content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        
+        payload = {
+            'message': f'Update {path} via SDOS Workspace',
+            'content': content_b64,
+            'sha': sha,
+            'branch': 'main'
+        }
+        
+        req = urllib.request.Request(url, method='PUT')
+        req.add_header('Authorization', f'token {token}')
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+        req.add_header('Content-Type', 'application/json')
+        
+        with urllib.request.urlopen(req, data=json.dumps(payload).encode(), timeout=10) as response:
+            result = json.loads(response.read().decode())
+            return {'success': True, 'sha': result['content']['sha']}
+    
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+WORKSPACE_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SDOS - Developer Workspace</title>
+    <meta http-equiv="Cache-Control" content="no-cache">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/editor/editor.main.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            background: #0f172a; 
+            color: #e2e8f0; 
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+        }
+        
+        .header h1 { font-size: 32px; color: white; }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        
+        .btn { 
+            background: #3b82f6; color: white; border: none; 
+            padding: 10px 20px; border-radius: 8px; cursor: pointer; 
+            text-decoration: none; display: inline-block; transition: all 0.3s; 
+        }
+        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn-home { background: #64748b; }
+        .btn-home:hover { background: #475569; }
+        .btn-success { background: #22c55e; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-danger { background: #ef4444; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-warning { background: #f59e0b; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-small { padding: 6px 12px; font-size: 12px; }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active { display: flex; }
+        
+        .modal-content {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        
+        .modal-header {
+            font-size: 24px;
+            color: #60a5fa;
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            background: #0f172a;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 25px;
+        }
+        
+        .main-container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            grid-template-rows: 1fr 180px;
+            height: calc(100vh - 80px);
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .left-panel {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            overflow-y: auto;
+        }
+        
+        .info-section {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+        }
+        
+        .info-section strong {
+            color: #60a5fa;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .github-repos {
+            margin-top: 8px;
+        }
+        
+        .repo-item {
+            background: #1e293b;
+            padding: 8px 10px;
+            border-radius: 6px;
+            margin: 5px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+        }
+        
+        .repo-name {
+            color: #22c55e;
+        }
+        
+        .info-section p {
+            color: #94a3b8;
+            margin: 3px 0;
+        }
+        
+        .file-tree {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .file-tree-title {
+            color: #60a5fa;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .file-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 4px 0;
+            font-size: 13px;
+            color: #cbd5e1;
+            transition: all 0.2s;
+        }
+        
+        .file-item:hover {
+            background: #1e293b;
+            color: #60a5fa;
+        }
+        
+        .file-item.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .file-item .file-repo {
+            font-size: 10px;
+            color: #64748b;
+            margin-left: 8px;
+        }
+        
+        .tool-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .tool-button {
+            background: #0f172a;
+            border: 2px solid #60a5fa;
+            border-radius: 8px;
+            padding: 12px 20px;
+            font-size: 15px;
+            color: #60a5fa;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        .tool-button:hover {
+            background: #1e293b;
+            border-color: #3b82f6;
+        }
+        
+        .tool-description {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-left: 10px;
+            line-height: 1.5;
+        }
+        
+        .bottom-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: auto;
+        }
+        
+        .nav-button {
+            flex: 1;
+            background: #334155;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 13px;
+            color: #e2e8f0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .nav-button:hover {
+            background: #475569;
+            border-color: #60a5fa;
+        }
+        
+        .editor-window {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .window-header {
+            background: #0f172a;
+            border: 1px solid #334155;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            color: #60a5fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .current-file {
+            font-size: 13px;
+            color: #94a3b8;
+            font-weight: normal;
+        }
+        
+        #monaco-editor {
+            flex: 1;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .command-line {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            grid-column: 2;
+            padding: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .command-header {
+            background: #0f172a;
+            border: 1px solid #334155;
+            padding: 10px 20px;
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            color: #60a5fa;
+        }
+        
+        .command-content {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #334155;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 100px;
+            border-radius: 8px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- GitHub Login Modal -->
+    <div class="modal" id="github-modal">
+        <div class="modal-content">
+            <div class="modal-header">🔐 Add GitHub Repository</div>
+            <div class="form-group">
+                <label>GitHub Personal Access Token</label>
+                <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx">
+                <p style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
+                    Create token at: <a href="https://github.com/settings/tokens" target="_blank" style="color: #60a5fa;">github.com/settings/tokens</a><br>
+                    Required scope: <code>repo</code>
+                </p>
+            </div>
+            <div class="form-group">
+                <label>Repository Owner (Username)</label>
+                <input type="text" id="github-owner" placeholder="your-username">
+            </div>
+            <div class="form-group">
+                <label>Repository Name</label>
+                <input type="text" id="github-repo" placeholder="microservices-repo">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-success" style="flex: 1;" onclick="connectGithub()">Add Repository</button>
+                <button class="btn btn-danger" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-left">
+            <a href="http://localhost:5000" class="btn btn-home">← Home</a>
+            <h1>Developer Workspace</h1>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="info-section">
+                <strong>📂 GitHub Repositories</strong>
+                <div id="github-repos-list">
+                    <p style="color: #64748b;">No repositories connected</p>
+                </div>
+                <button class="btn btn-success btn-small" style="margin-top: 10px; width: 100%;" onclick="showGithubModal()">+ Add Repository</button>
+            </div>
+            
+            <div class="info-section" onclick="openVSCode()">
+                <strong>💻 Visual Studio Code</strong>
+                <p>Monaco Editor v0.44.0</p>
+                <p>Language: Auto-detect</p>
+                <p>Theme: VS Dark</p>
+            </div>
+            
+            <div class="file-tree">
+                <div class="file-tree-title">📁 Microservice Files (<span id="file-source">Local + GitHub</span>)</div>
+                <div id="file-list">Loading...</div>
+            </div>
+            
+            <div class="tool-section">
+                <button class="tool-button" onclick="refreshFiles()">🔄 Refresh Files</button>
+                <div class="tool-description">Reload all files from local + GitHub</div>
+            </div>
+            
+            <div class="bottom-buttons">
+                <button class="nav-button" onclick="goToDashboard()">Main Dashboard</button>
+                <button class="nav-button" onclick="checkPipelines()">Pipelines</button>
+            </div>
+        </div>
+        
+        <div class="editor-window">
+            <div class="window-header">
+                <div>
+                    <span>CODE EDITOR (VS CODE)</span>
+                    <div class="current-file" id="current-file">No file selected</div>
+                </div>
+                <div class="editor-actions">
+                    <button class="btn btn-success" onclick="saveFile()">💾 Save</button>
+                    <button class="btn btn-warning" onclick="commitToGithub()" id="commit-btn" style="display:none;">📤 Push to GitHub</button>
+                    <button class="btn btn-danger" onclick="reloadFile()">↻ Reload</button>
+                </div>
+            </div>
+            <div id="monaco-editor"></div>
+        </div>
+        
+        <div class="command-line">
+            <div class="command-header">> COMMAND LINE</div>
+            <div class="command-content" id="terminal">$ SDOS Developer Workspace - GitHub Integration
+$ Monaco Editor (VS Code) initialized
+$ Add GitHub repositories to edit microservices
+$ </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+    <script>
+        let editor;
+        let currentFile = '';
+        let currentFilePath = '';
+        let currentSource = 'local';
+        let currentRepo = '';
+        let currentSha = '';
+        let githubRepos = [];
+        
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+        
+        require(['vs/editor/editor.main'], function() {
+            editor = monaco.editor.create(document.getElementById('monaco-editor'), {
+                value: '# SDOS Developer Workspace - Multi-Repository GitHub Editor\\n# \\n# Features:\\n#   - Add multiple GitHub repositories\\n#   - View all microservices in one place\\n#   - Edit and push changes to GitHub\\n#   - Local file editing\\n# \\n# Getting Started:\\n#   1. Click "+ Add Repository" to connect GitHub repos\\n#   2. Files from all repos appear in the file list\\n#   3. Edit and push changes back to GitHub\\n',
+                language: 'python',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                fontSize: 14,
+                minimap: { enabled: true },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on'
+            });
+            
+            addTerminalLine('VS Code Monaco Editor initialized');
+            loadGithubRepos();
+            loadFileList();
+        });
+        
+        function showGithubModal() {
+            document.getElementById('github-modal').classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('github-modal').classList.remove('active');
+        }
+        
+        async function loadGithubRepos() {
+            const response = await fetch('/api/list-github-repos');
+            const data = await response.json();
+            
+            githubRepos = data.repos || [];
+            updateReposList();
+        }
+        
+        function updateReposList() {
+            const container = document.getElementById('github-repos-list');
+            
+            if (githubRepos.length === 0) {
+                container.innerHTML = '<p style="color: #64748b;">No repositories connected</p>';
+            } else {
+                container.innerHTML = '';
+                githubRepos.forEach((repo, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'repo-item';
+                    div.innerHTML = `
+                        <span class="repo-name">${repo}</span>
+                        <button class="btn btn-danger btn-small" onclick="removeRepo(${idx})">Remove</button>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+        }
+        
+        async function removeRepo(index) {
+            const response = await fetch('/api/remove-github-repo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: index })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                await loadGithubRepos();
+                await loadFileList();
+                addTerminalLine(`Removed repository`);
+            }
+        }
+        
+        async function connectGithub() {
+            const token = document.getElementById('github-token').value;
+            const owner = document.getElementById('github-owner').value;
+            const repo = document.getElementById('github-repo').value;
+            
+            if (!token || !owner || !repo) {
+                addTerminalLine('✗ Please fill in all fields');
+                return;
+            }
+            
+            const response = await fetch('/api/add-github-repo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, owner, repo })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                closeModal();
+                document.getElementById('github-token').value = '';
+                document.getElementById('github-owner').value = '';
+                document.getElementById('github-repo').value = '';
+                
+                await loadGithubRepos();
+                await loadFileList();
+                addTerminalLine(`✓ Added repository: ${owner}/${repo}`);
+            } else {
+                addTerminalLine(`✗ Failed to add repository: ${data.error}`);
+            }
+        }
+        
+        function openVSCode() {
+            addTerminalLine('Visual Studio Code (Monaco Editor) is active');
+            editor.focus();
+        }
+        
+        async function loadFileList() {
+            try {
+                const response = await fetch('/api/list-all-files');
+                const data = await response.json();
+                
+                const fileList = document.getElementById('file-list');
+                fileList.innerHTML = '';
+                
+                if (data.error) {
+                    fileList.innerHTML = `<div style="color: #ef4444;">${data.error}</div>`;
+                    return;
+                }
+                
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        const div = document.createElement('div');
+                        div.className = 'file-item';
+                        
+                        const repoLabel = file.repo 
+                            ? ` <span class="file-repo" style="color:#22c55e;">[GitHub: ${file.repo}]</span>` 
+                            : ` <span class="file-repo" style="color:#94a3b8;">[Local]</span>`;
+                        div.innerHTML = `${file.name}${repoLabel}`;
+                        
+                        div.onclick = () => loadFile(
+                            file.path, 
+                            file.name, 
+                            file.type || 'github',
+                            file.repo || '',
+                            file.sha || ''
+                        );
+                        fileList.appendChild(div);
+                    });
+                    addTerminalLine(`Found ${data.files.length} files (Local + GitHub)`);
+                } else {
+                    fileList.innerHTML = '<div style="color: #94a3b8;">No files found</div>';
+                }
+            } catch (error) {
+                addTerminalLine(`Error loading files: ${error.message}`);
+            }
+        }
+        
+        async function loadFile(filepath, filename, source, repo, sha = '') {
+            try {
+                const response = await fetch('/api/load-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filepath, source, repo })
+                });
+                const data = await response.json();
+                
+                if (data.content) {
+                    editor.setValue(data.content);
+                    currentFile = filename;
+                    currentFilePath = filepath;
+                    currentSource = source;
+                    currentRepo = repo;
+                    currentSha = data.sha || sha;
+                    document.getElementById('current-file').textContent = repo ? `${filename} [${repo}]` : filename;
+                    
+                    if (source === 'github') {
+                        document.getElementById('commit-btn').style.display = 'inline-block';
+                    } else {
+                        document.getElementById('commit-btn').style.display = 'none';
+                    }
+                    
+                    const ext = filename.split('.').pop();
+                    const langMap = {
+                        'py': 'python', 'js': 'javascript', 'html': 'html', 'css': 'css',
+                        'json': 'json', 'yaml': 'yaml', 'yml': 'yaml', 'sh': 'shell'
+                    };
+                    monaco.editor.setModelLanguage(editor.getModel(), langMap[ext] || 'plaintext');
+                    
+                    document.querySelectorAll('.file-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    event.target.classList.add('active');
+                    
+                    addTerminalLine(`Loaded ${filename} from ${source} (${data.content.split('\\n').length} lines)`);
+                    editor.focus();
+                } else {
+                    addTerminalLine(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                addTerminalLine(`Error: ${error.message}`);
+            }
+        }
+        
+        async function saveFile() {
+            if (!currentFilePath) {
+                addTerminalLine('No file selected');
+                return;
+            }
+            
+            const content = editor.getValue();
+            
+            try {
+                const response = await fetch('/api/save-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        filepath: currentFilePath,
+                        content: content,
+                        source: currentSource,
+                        repo: currentRepo,
+                        sha: currentSha
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.sha) {
+                        currentSha = data.sha;
+                    }
+                    addTerminalLine(`✓ Saved ${currentFile}`);
+                } else {
+                    addTerminalLine(`✗ Error: ${data.error}`);
+                }
+            } catch (error) {
+                addTerminalLine(`✗ Error: ${error.message}`);
+            }
+        }
+        
+        async function commitToGithub() {
+            await saveFile();
+            addTerminalLine(`✓ Pushed ${currentFile} to ${currentRepo}`);
+        }
+        
+        function reloadFile() {
+            if (currentFilePath) {
+                loadFile(currentFilePath, currentFile, currentSource, currentRepo, currentSha);
+            }
+        }
+        
+        function refreshFiles() {
+            loadFileList();
+        }
+        
+        function goToDashboard() {
+            window.location.href = 'http://localhost:8080';
+        }
+        
+        function checkPipelines() {
+            fetch('http://localhost:7000')
+                .then(() => window.location.href = 'http://localhost:7000')
+                .catch(() => addTerminalLine('✗ Pipeline Dashboard not running'));
+        }
+        
+        function addTerminalLine(text) {
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML += '$ ' + text + '<br>';
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    </script>
+</body>
+</html>
+'''
+
+@app.route('/')
+def workspace():
+    return render_template_string(WORKSPACE_TEMPLATE)
+
+@app.route('/api/list-github-repos')
+def list_github_repos():
+    """List connected GitHub repos"""
+    repos = session.get('github_repos', [])
+    repo_names = [f"{r['owner']}/{r['repo']}" for r in repos]
+    return jsonify({'repos': repo_names})
+
+@app.route('/api/add-github-repo', methods=['POST'])
+def add_github_repo():
+    """Add GitHub repository"""
+    data = request.json
+    token = data.get('token', '')
+    owner = data.get('owner', '')
+    repo = data.get('repo', '')
+    
+    # Test connection
+    result = get_github_files(token, owner, repo)
+    
+    if result.get('error'):
+        return jsonify({'success': False, 'error': result['error']})
+    
+    # Add to session
+    repos = session.get('github_repos', [])
+    repos.append({'token': token, 'owner': owner, 'repo': repo})
+    session['github_repos'] = repos
+    
+    return jsonify({'success': True})
+
+@app.route('/api/remove-github-repo', methods=['POST'])
+def remove_github_repo():
+    """Remove GitHub repository"""
+    data = request.json
+    index = data.get('index', -1)
+    
+    repos = session.get('github_repos', [])
+    if 0 <= index < len(repos):
+        repos.pop(index)
+        session['github_repos'] = repos
+        return jsonify({'success': True})
+    
+    return jsonify({'success': False})
+
+@app.route('/api/list-all-files')
+def list_all_files():
+    """List files from local + all GitHub repos"""
+    all_files = []
+    
+    # Get local files
+    local_result = get_local_files()
+    all_files.extend(local_result.get('files', []))
+    
+    # Get files from each GitHub repo
+    repos = session.get('github_repos', [])
+    for repo_config in repos:
+        github_result = get_github_files(
+            repo_config['token'],
+            repo_config['owner'],
+            repo_config['repo']
+        )
+        all_files.extend(github_result.get('files', []))
+    
+    return jsonify({'files': all_files})
+
+@app.route('/api/load-file', methods=['POST'])
+def load_file():
+    """Load file from GitHub or local"""
+    data = request.json
+    filepath = data.get('filepath', '')
+    source = data.get('source', 'local')
+    repo = data.get('repo', '')
+    
+    if source == 'github':
+        # Find the repo config
+        repos = session.get('github_repos', [])
+        for repo_config in repos:
+            repo_name = f"{repo_config['owner']}/{repo_config['repo']}"
+            if repo_name == repo:
+                return jsonify(load_github_file(
+                    repo_config['token'],
+                    repo_config['owner'],
+                    repo_config['repo'],
+                    filepath
+                ))
+        
+        return jsonify({'error': 'Repository not found'})
+    else:
+        if not filepath or not filepath.startswith(CODE_BASE_PATH):
+            return jsonify({'error': 'Invalid file path'})
+        
+        try:
+            with open(filepath, 'r') as f:
+                content = f.read()
+            return jsonify({'content': content, 'source': 'local'})
+        except Exception as e:
+            return jsonify({'error': str(e)})
+
+@app.route('/api/save-file', methods=['POST'])
+def save_file():
+    """Save file to GitHub or local"""
+    data = request.json
+    filepath = data.get('filepath', '')
+    content = data.get('content', '')
+    source = data.get('source', 'local')
+    repo = data.get('repo', '')
+    sha = data.get('sha', '')
+    
+    if source == 'github':
+        # Find the repo config
+        repos = session.get('github_repos', [])
+        for repo_config in repos:
+            repo_name = f"{repo_config['owner']}/{repo_config['repo']}"
+            if repo_name == repo:
+                return jsonify(save_github_file(
+                    repo_config['token'],
+                    repo_config['owner'],
+                    repo_config['repo'],
+                    filepath,
+                    content,
+                    sha
+                ))
+        
+        return jsonify({'success': False, 'error': 'Repository not found'})
+    else:
+        if not filepath or not filepath.startswith(CODE_BASE_PATH):
+            return jsonify({'success': False, 'error': 'Invalid file path'})
+        
+        try:
+            with open(filepath, 'w') as f:
+                f.write(content)
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+
+if __name__ == '__main__':
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    
+    print("="*60)
+    print("SDOS Developer Workspace - Multi-Repo GitHub")
+    print("="*60)
+    print("Access: http://localhost:6001")
+    print("")
+    print("Features:")
+    print("  - Add multiple GitHub repositories")
+    print("  - View all microservices in one place")
+    print("  - Edit and push to GitHub")
+    print("  - Local file editing")
+    print("")
+    print("Press Ctrl+C to stop")
+    print("="*60)
+    
+    try:
+        app.run(host='0.0.0.0', port=6001, debug=False, threaded=True, use_reloader=False)
+    except KeyboardInterrupt:
+        print("\n" + "="*60)
+        print("Developer Workspace stopped")
+        print("="*60)
+        sys.exit(0)

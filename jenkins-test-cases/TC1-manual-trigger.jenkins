@@ -1,0 +1,11 @@
+pipeline {
+    agent any
+    stages {
+        stage('Manual Test') {
+            steps {
+                echo 'TC1: Manual trigger test'
+                sh 'date'
+            }
+        }
+    }
+}

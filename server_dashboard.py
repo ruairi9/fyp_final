@@ -1,0 +1,615 @@
+from flask import Flask, render_template_string, jsonify
+import subprocess
+import json
+import os
+import re
+import signal
+import sys
+
+app = Flask(__name__)
+
+KUBECONFIG_PATH = os.path.expanduser('~/fyp-cluster/k3s.yaml')
+
+def signal_handler(sig, frame):
+    print('\n\n' + '='*60)
+    print('Server Dashboard stopped')
+    print('='*60)
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def get_vm_metrics():
+    """Get real metrics for each VM using vagrant ssh"""
+    vms = {
+        'control-plane': 'control-plane',
+        'worker-dev-integration': 'worker-dev',
+        'worker-production': 'worker-prod',
+        'worker-cicd': 'worker-cicd',
+        'worker-registry-monitoring': 'worker-monitoring'
+    }
+    
+    vm_data = []
+    
+    for k8s_name, vagrant_name in vms.items():
+        try:
+            # Get CPU idle percentage
+            cpu_result = subprocess.run(
+                ['vagrant', 'ssh', vagrant_name, '-c', 
+                 "top -bn1 | grep 'Cpu(s)'"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=os.path.expanduser('~/fyp-cluster')
+            )
+            
+            cpu_usage = 0
+            if cpu_result.returncode == 0:
+                # Parse: %Cpu(s):  0.0 us,  3.3 sy,  0.0 ni, 96.7 id, ...
+                cpu_line = cpu_result.stdout.strip()
+                # Extract idle percentage
+                idle_match = re.search(r'([\d.]+)\s+id', cpu_line)
+                if idle_match:
+                    idle = float(idle_match.group(1))
+                    cpu_usage = round(100 - idle, 1)
+            
+            # Get RAM
+            ram_result = subprocess.run(
+                ['vagrant', 'ssh', vagrant_name, '-c', 
+                 "free | grep Mem"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=os.path.expanduser('~/fyp-cluster')
+            )
+            
+            ram_usage = 0
+            if ram_result.returncode == 0:
+                parts = ram_result.stdout.strip().split()
+                if len(parts) >= 3:
+                    total = int(parts[1])
+                    used = int(parts[2])
+                    ram_usage = round((used / total) * 100, 1)
+            
+            # Get Disk
+            disk_result = subprocess.run(
+                ['vagrant', 'ssh', vagrant_name, '-c', 
+                 "df -h / | tail -1"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=os.path.expanduser('~/fyp-cluster')
+            )
+            
+            disk_usage = 'N/A'
+            if disk_result.returncode == 0:
+                parts = disk_result.stdout.strip().split()
+                if len(parts) >= 5:
+                    disk_usage = parts[4]
+            
+            vm_data.append({
+                'name': k8s_name,
+                'cpu': cpu_usage,
+                'ram': ram_usage,
+                'disk': disk_usage,
+                'disk_io': 'N/A',
+                'steal_time': '0.0%',
+                'throughput': 'N/A'
+            })
+            
+        except Exception as e:
+            print(f"Error getting metrics for {k8s_name}: {e}")
+            vm_data.append({
+                'name': k8s_name,
+                'cpu': 0,
+                'ram': 0,
+                'disk': 'N/A',
+                'disk_io': 'N/A',
+                'steal_time': 'N/A',
+                'throughput': 'N/A'
+            })
+    
+    return vm_data
+
+def get_host_stats():
+    """Get host server statistics"""
+    try:
+        # RAM stats
+        ram_result = subprocess.run(['free', '-m'], capture_output=True, text=True, timeout=3)
+        
+        total_ram = 0
+        used_ram = 0
+        swap_used = 0
+        swap_total = 0
+        
+        if ram_result.returncode == 0:
+            lines = ram_result.stdout.strip().split('\n')
+            mem_line = [l for l in lines if 'Mem:' in l][0]
+            parts = mem_line.split()
+            total_ram = int(parts[1])
+            used_ram = int(parts[2])
+            
+            swap_line = [l for l in lines if 'Swap:' in l]
+            if swap_line:
+                swap_parts = swap_line[0].split()
+                swap_total = int(swap_parts[1])
+                swap_used = int(swap_parts[2])
+        
+        ram_percent = round((used_ram / total_ram * 100), 1) if total_ram > 0 else 0
+        swap_percent = round((swap_used / swap_total * 100), 1) if swap_total > 0 else 0
+        
+        # CPU usage
+        cpu_result = subprocess.run(['top', '-bn1'], capture_output=True, text=True, timeout=3)
+        
+        cpu_percent = 0
+        cpu_wait = 0
+        
+        if cpu_result.returncode == 0:
+            for line in cpu_result.stdout.split('\n'):
+                if 'Cpu(s)' in line:
+                    idle_match = re.search(r'([\d.]+)\s*id', line)
+                    wait_match = re.search(r'([\d.]+)\s*wa', line)
+                    
+                    if idle_match:
+                        idle = float(idle_match.group(1))
+                        cpu_percent = round(100 - idle, 1)
+                    if wait_match:
+                        cpu_wait = float(wait_match.group(1))
+                    break
+        
+        # Disk usage
+        disk_result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, timeout=3)
+        
+        disk_percent = 0
+        if disk_result.returncode == 0:
+            lines = disk_result.stdout.strip().split('\n')
+            if len(lines) > 1:
+                parts = lines[1].split()
+                disk_str = parts[4].replace('%', '')
+                disk_percent = int(disk_str)
+        
+        # Disk I/O
+        iostat_result = subprocess.run(['iostat', '-d', '-x', '1', '1'], capture_output=True, text=True, timeout=3)
+        
+        disk_throughput = 0
+        disk_iops = 0
+        
+        if iostat_result.returncode == 0:
+            lines = iostat_result.stdout.strip().split('\n')
+            for i, line in enumerate(lines):
+                if 'Device' in line:
+                    if i + 1 < len(lines):
+                        data_line = lines[i + 1]
+                        parts = data_line.split()
+                        if len(parts) >= 6:
+                            disk_iops = float(parts[3]) + float(parts[4])
+                            disk_throughput = (float(parts[5]) + float(parts[6])) / 1024
+                    break
+        
+        return {
+            'ram_usage': ram_percent,
+            'ram_available': round(100 - ram_percent, 1),
+            'swap_usage': swap_percent,
+            'cpu_usage': cpu_percent,
+            'cpu_wait': cpu_wait,
+            'disk_usage': disk_percent,
+            'disk_throughput': round(disk_throughput, 1),
+            'disk_iops': round(disk_iops, 0)
+        }
+    except Exception as e:
+        print(f"Error getting host stats: {e}")
+        return {
+            'ram_usage': 0,
+            'ram_available': 0,
+            'swap_usage': 0,
+            'cpu_usage': 0,
+            'cpu_wait': 0,
+            'disk_usage': 0,
+            'disk_throughput': 0,
+            'disk_iops': 0
+        }
+
+def get_pod_count():
+    """Get number of running pods"""
+    try:
+        result = subprocess.run(
+            ['kubectl', 'get', 'pods', '--all-namespaces', '--no-headers', f'--kubeconfig={KUBECONFIG_PATH}'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            running = sum(1 for line in lines if 'Running' in line)
+            return running
+        return 0
+    except:
+        return 0
+
+SERVER_DASHBOARD_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SDOS Server Dashboard</title>
+    <meta http-equiv="Cache-Control" content="no-cache">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            background: #0f172a; 
+            color: #e2e8f0; 
+            padding: 20px;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .header {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            padding: 20px 30px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+        }
+        .header h1 { font-size: 32px; }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        .btn { 
+            background: #3b82f6; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            text-decoration: none; 
+            display: inline-block; 
+            transition: all 0.3s; 
+        }
+        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn-home { background: #64748b; }
+        .btn-home:hover { background: #475569; }
+        .main-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+        .sidebar { display: flex; flex-direction: column; gap: 20px; }
+        .sidebar-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid #334155;
+        }
+        .sidebar-card h3 {
+            color: #60a5fa;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 10px;
+            font-size: 14px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 12px;
+            border-bottom: 1px solid #334155;
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #94a3b8; }
+        .stat-value { color: #e2e8f0; font-weight: 500; }
+        .content-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            border: 1px solid #334155;
+        }
+        .content-card h3 {
+            color: #60a5fa;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 10px;
+            font-size: 16px;
+        }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th {
+            background: #0f172a;
+            color: #60a5fa;
+            padding: 12px;
+            text-align: left;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+        tr:hover { background: #334155; }
+        .vm-name { color: #3b82f6; cursor: pointer; }
+        .vm-name:hover { text-decoration: underline; }
+        .selected-section {
+            background: #334155;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #60a5fa;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        .chart-box {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .chart-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 10px;
+            color: #94a3b8;
+        }
+        .chart-svg { width: 100%; height: 140px; }
+        .info-box {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #334155;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .real-data { color: #22c55e; }
+        .placeholder-data { color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-left">
+                <a href="http://localhost:5000" class="btn btn-home">← Home</a>
+                <h1>Server Dashboard</h1>
+            </div>
+            <button onclick="fetchData()" class="btn">Refresh</button>
+        </div>
+
+        <div class="main-grid">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-card">
+                    <h3>RAM STATUS <span class="real-data" style="font-size: 10px;">(REAL)</span></h3>
+                    <div class="stat-row">
+                        <span class="stat-label">Total RAM Usage</span>
+                        <span class="stat-value real-data" id="ram-usage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Available Memory</span>
+                        <span class="stat-value real-data" id="ram-available">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Swap Usage</span>
+                        <span class="stat-value real-data" id="swap-usage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Page Faults</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">OOM Events</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Cache Faults</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3>CPU STATUS <span class="real-data" style="font-size: 10px;">(REAL)</span></h3>
+                    <div class="stat-row">
+                        <span class="stat-label">CPU Utilisation</span>
+                        <span class="stat-value real-data" id="cpu-usage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">CPU Steal Time</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">I/O Waits</span>
+                        <span class="stat-value real-data" id="cpu-wait">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">CPU Ready Time</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h3>DISK & STORAGE <span class="real-data" style="font-size: 10px;">(REAL)</span></h3>
+                    <div class="stat-row">
+                        <span class="stat-label">Disk Usage</span>
+                        <span class="stat-value real-data" id="disk-usage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">I/O Throughput</span>
+                        <span class="stat-value real-data" id="disk-throughput">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Disk IOPS</span>
+                        <span class="stat-value real-data" id="disk-iops">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Disk Latency</span>
+                        <span class="stat-value placeholder-data">N/A</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">I/O Waits</span>
+                        <span class="stat-value real-data" id="io-wait">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="content-card">
+                <h3>VM LIST <span class="real-data" style="font-size: 12px;">(CPU, RAM, DISK = REAL)</span></h3>
+                
+                <table id="vm-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>vCPU %</th>
+                            <th>RAM %</th>
+                            <th>Disk Usage</th>
+                            <th>Steal Time</th>
+                            <th>Disk I/O</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6">Loading...</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="selected-section">Selected VM: control-plane</div>
+
+                <div class="charts-grid">
+                    <div class="chart-box">
+                        <div class="chart-title">CPU Utilisation <span class="placeholder-data" style="font-size: 10px;">(demo)</span></div>
+                        <svg class="chart-svg" id="cpu-chart"></svg>
+                    </div>
+                    <div class="chart-box">
+                        <div class="chart-title">Memory Usage <span class="placeholder-data" style="font-size: 10px;">(demo)</span></div>
+                        <svg class="chart-svg" id="memory-chart"></svg>
+                    </div>
+                    <div class="chart-box">
+                        <div class="chart-title">Disk I/O <span class="placeholder-data" style="font-size: 10px;">(demo)</span></div>
+                        <svg class="chart-svg" id="disk-chart"></svg>
+                    </div>
+                    <div class="chart-box">
+                        <div class="chart-title">Disk Latency <span class="placeholder-data" style="font-size: 10px;">(demo)</span></div>
+                        <svg class="chart-svg" id="latency-chart"></svg>
+                    </div>
+                    <div class="chart-box">
+                        <div class="chart-title">Network Traffic <span class="placeholder-data" style="font-size: 10px;">(demo)</span></div>
+                        <svg class="chart-svg" id="network-chart"></svg>
+                    </div>
+                    <div class="info-box">
+                        <div class="info-row">
+                            <span style="font-weight: bold; color: #60a5fa;">PODs</span>
+                            <span id="pod-count" class="real-data">-</span>
+                        </div>
+                        <div class="info-row">
+                            <span style="font-weight: bold; color: #60a5fa;">CLUSTERS</span>
+                            <span class="real-data">1</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function drawChart(elementId, color) {
+            const svg = document.getElementById(elementId);
+            const width = svg.clientWidth || 300;
+            const height = 140;
+            const padding = 20;
+            
+            const points = [];
+            for (let i = 0; i < 20; i++) {
+                const x = padding + (i / 19) * (width - 2 * padding);
+                const y = padding + Math.random() * (height - 2 * padding);
+                points.push(x + ',' + y);
+            }
+            
+            svg.innerHTML = 
+                '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="2"/>' +
+                '<line x1="' + padding + '" y1="' + (height - padding) + '" x2="' + (width - padding) + '" y2="' + (height - padding) + '" stroke="#475569" stroke-width="1"/>' +
+                '<line x1="' + padding + '" y1="' + padding + '" x2="' + padding + '" y2="' + (height - padding) + '" stroke="#475569" stroke-width="1"/>';
+        }
+        
+        async function fetchData() {
+            try {
+                const data = await (await fetch('/api/server-data')).json();
+                
+                // Update sidebar
+                document.getElementById('ram-usage').textContent = data.host_stats.ram_usage + '%';
+                document.getElementById('ram-available').textContent = data.host_stats.ram_available + '%';
+                document.getElementById('swap-usage').textContent = data.host_stats.swap_usage + '%';
+                document.getElementById('cpu-usage').textContent = data.host_stats.cpu_usage + '%';
+                document.getElementById('cpu-wait').textContent = data.host_stats.cpu_wait + '%';
+                document.getElementById('disk-usage').textContent = data.host_stats.disk_usage + '%';
+                document.getElementById('disk-throughput').textContent = data.host_stats.disk_throughput + ' MB/s';
+                document.getElementById('disk-iops').textContent = data.host_stats.disk_iops + '/sec';
+                document.getElementById('io-wait').textContent = data.host_stats.cpu_wait + '%';
+                document.getElementById('pod-count').textContent = data.pod_count;
+                
+                // Update VM table
+                const tbody = document.querySelector('#vm-table tbody');
+                tbody.innerHTML = '';
+                data.vms.forEach(vm => {
+                    const row = tbody.insertRow();
+                    row.innerHTML = 
+                        '<td><span class="vm-name">' + vm.name + '</span></td>' +
+                        '<td class="real-data">' + vm.cpu + '%</td>' +
+                        '<td class="real-data">' + vm.ram + '%</td>' +
+                        '<td class="real-data">' + vm.disk + '</td>' +
+                        '<td class="placeholder-data">' + vm.steal_time + '</td>' +
+                        '<td class="placeholder-data">' + vm.disk_io + '</td>';
+                });
+                
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+        
+        // Draw charts
+        drawChart('cpu-chart', '#60a5fa');
+        drawChart('memory-chart', '#22c55e');
+        drawChart('disk-chart', '#f59e0b');
+        drawChart('latency-chart', '#8b5cf6');
+        drawChart('network-chart', '#ef4444');
+        
+        // Initial fetch and auto-refresh
+        fetchData();
+        setInterval(fetchData, 5000);
+    </script>
+</body>
+</html>
+'''
+
+@app.route('/')
+def server_dashboard():
+    return render_template_string(SERVER_DASHBOARD_TEMPLATE)
+
+@app.route('/api/server-data')
+def get_server_data():
+    try:
+        host_stats = get_host_stats()
+        vms = get_vm_metrics()
+        pod_count = get_pod_count()
+        
+        return jsonify({
+            'host_stats': host_stats,
+            'vms': vms,
+            'pod_count': pod_count
+        })
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    print("="*60)
+    print("SDOS Server Dashboard (FIXED CPU PARSING)")
+    print("="*60)
+    print("Access: http://localhost:9000")
+    print("="*60)
+    app.run(host='0.0.0.0', port=9000, debug=False, threaded=True, use_reloader=False)

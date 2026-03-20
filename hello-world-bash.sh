@@ -1,0 +1,15 @@
+#!/bin/bash
+
+echo "=================================================="
+echo "HELLO WORLD APPLICATION"
+echo "=================================================="
+echo ""
+echo "Hello, World!"
+echo ""
+echo "Running on: $(uname -s)"
+echo "Hostname: $(hostname)"
+echo "Date: $(date)"
+echo "User: $(whoami)"
+echo ""
+echo "✓ Hello World executed successfully!"
+echo "=================================================="
