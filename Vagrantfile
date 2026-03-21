@@ -471,6 +471,22 @@ EOF
 
       create_job "hello-world" "pipeline { agent any stages { stage('Hello') { steps { echo 'Hello World from SDOS!' } } stage('Test') { steps { echo 'All tests passed!'; sleep 6 } } } }"
 
+
+      # Create load test pipeline from file
+      if [ -f /vagrant/Jenkinsfiles/safe-load-test ]; then
+        LOAD_SCRIPT=$(cat /vagrant/Jenkinsfiles/safe-load-test)
+        create_job "safe-load-test" "$LOAD_SCRIPT"
+      else
+        echo "WARNING: safe-load-test Jenkinsfile not found in repo"
+      fi
+
+      # Create nginx deploy pipeline from file
+      if [ -f /vagrant/Jenkinsfiles/nginx-deploy ]; then
+        NGINX_SCRIPT=$(cat /vagrant/Jenkinsfiles/nginx-deploy)
+        create_job "nginx-deploy" "$NGINX_SCRIPT"
+      else
+        echo "WARNING: nginx-deploy Jenkinsfile not found in repo"
+      fi
       echo "All pipelines created"
 
       # Set up SSH key for host-agent
