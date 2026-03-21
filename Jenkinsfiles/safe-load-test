@@ -1,0 +1,271 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        VAGRANT_DIR  = '/home/ruairi/fyp-cluster'
+        KUBECONFIG   = '/home/ruairi/fyp-cluster/k3s.yaml'
+        REPORT_FILE  = 'load-test-report.txt'
+        // Safety limits
+        MAX_CPU_PCT  = '85'
+        MAX_RAM_PCT  = '85'
+        MAX_DISK_PCT = '85'
+        TEST_DURATION = '30'   // seconds per stage (safe)
+    }
+
+    stages {
+
+        stage('Build') {
+            steps {
+                echo '============================================'
+                echo ' SDOS SAFE LOAD TEST — All 5 VMs'
+                echo ' Resource cap: 50% CPU + 50% RAM'
+                echo '============================================'
+                sh '''
+                    echo "Safe Load Test Started: $(date)" > $REPORT_FILE
+                    echo "Resource Cap: 50% CPU, 50% RAM, 50% Disk I/O" >> $REPORT_FILE
+                    echo "Safety Limits: CPU<${MAX_CPU_PCT}%, RAM<${MAX_RAM_PCT}%, DISK<${MAX_DISK_PCT}%" >> $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
+
+                    cd $VAGRANT_DIR
+
+                    # Pre-flight: check disk space on host
+                    AVAIL=$(df / | tail -1 | awk '{print $4}')
+                    echo "Host available disk: ${AVAIL}KB"
+                    if [ "$AVAIL" -lt "2000000" ]; then
+                        echo "ERROR: Less than 2GB free on host — aborting load test"
+                        exit 1
+                    fi
+                    echo "Host disk check: PASS"
+
+                    # Pre-flight: check all VMs are reachable
+                    echo "" >> $REPORT_FILE
+                    echo "=== PRE-FLIGHT CHECKS ===" >> $REPORT_FILE
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        STATUS=$(vagrant ssh $VM -c "echo OK" 2>/dev/null | grep OK || echo "UNREACHABLE")
+                        echo "$VM: $STATUS" >> $REPORT_FILE
+                        echo "$VM: $STATUS"
+                    done
+
+                    # Install stress-ng if not present
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        vagrant ssh $VM -c "which stress-ng > /dev/null 2>&1 || sudo apt-get install -y stress-ng -qq > /dev/null 2>&1" 2>/dev/null &
+                    done
+                    wait
+                    echo "Setup complete"
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Stage 2 — Baseline + CPU stress at 50%'
+                sh '''
+                    cd $VAGRANT_DIR
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BASELINE METRICS ===" >> $WORKSPACE/$REPORT_FILE
+
+                    # Record baseline
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo 'CPU idle:   '$(top -bn1 | grep Cpu | awk '{print \$8}')
+                            echo 'RAM used:   '$(free | grep Mem | awk '{printf \"%.1f%%\", \$3/\$2*100}')
+                            echo 'Disk usage: '$(df -h / | tail -1 | awk '{print \$5}')
+                            echo 'Load avg:   '$(cat /proc/loadavg | awk '{print \$1, \$2, \$3}')
+                        " 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true &
+                    done
+                    wait
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== CPU STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    # Start CPU stress at 50% on all VMs
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        vagrant ssh $VM -c "
+                            # Get CPU count
+                            CPUS=\$(nproc)
+                            # Use half the CPUs
+                            HALF=\$(( CPUS / 2 ))
+                            [ \$HALF -lt 1 ] && HALF=1
+                            nohup stress-ng --cpu \$HALF --cpu-load 50 --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
+                        " 2>/dev/null &
+                    done
+                    wait
+
+                    # Wait half the test duration then sample
+                    sleep 15
+
+                    # Safety check — abort if any VM is over limit
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        CPU=$(vagrant ssh $VM -c "top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.0f\", 100-\$8}'" 2>/dev/null | tail -1 || echo "0")
+                        echo "$VM CPU: ${CPU}%"
+                        if [ "$CPU" -gt "$MAX_CPU_PCT" ] 2>/dev/null; then
+                            echo "WARNING: $VM CPU at ${CPU}% — killing stress"
+                            vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; true" 2>/dev/null || true
+                        fi
+                    done
+
+                    # Record peak CPU
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM CPU peak ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo 'CPU usage:  '$(top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.1f%%\", 100-\$8}')
+                            echo 'Load avg:   '$(cat /proc/loadavg | awk '{print \$1, \$2, \$3}')
+                            echo 'Steal time: '$(top -bn2 | grep Cpu | tail -1 | awk '{print \$16\"%\"}')
+                        " 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true &
+                    done
+                    wait
+                '''
+            }
+        }
+
+        stage('Staging') {
+            steps {
+                echo 'Stage 3 — RAM stress at 50%'
+                sh '''
+                    cd $VAGRANT_DIR
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== RAM STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        vagrant ssh $VM -c "
+                            nohup stress-ng --vm 1 --vm-bytes 50% --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
+                        " 2>/dev/null &
+                    done
+                    wait
+
+                    sleep 15
+
+                    # Safety check RAM
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        RAM=$(vagrant ssh $VM -c "free | grep Mem | awk '{printf \"%.0f\", \$3/\$2*100}'" 2>/dev/null | tail -1 || echo "0")
+                        echo "$VM RAM: ${RAM}%"
+                        if [ "$RAM" -gt "$MAX_RAM_PCT" ] 2>/dev/null; then
+                            echo "WARNING: $VM RAM at ${RAM}% — killing stress"
+                            vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; true" 2>/dev/null || true
+                        fi
+                    done
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM RAM peak ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo 'RAM used:  '$(free | grep Mem | awk '{printf \"%.1f%%\", \$3/\$2*100}')
+                            echo 'Swap used: '$(free | grep Swap | awk '{if(\$2>0) printf \"%.1f%%\", \$3/\$2*100; else print \"N/A\"}')
+                        " 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true &
+                    done
+                    wait
+                '''
+            }
+        }
+
+        stage('Load') {
+            steps {
+                echo 'Stage 4 — Combined stress at 50% (CPU + RAM + Disk)'
+                sh '''
+                    cd $VAGRANT_DIR
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== COMBINED STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        vagrant ssh $VM -c "
+                            CPUS=\$(nproc)
+                            HALF=\$(( CPUS / 2 ))
+                            [ \$HALF -lt 1 ] && HALF=1
+                            nohup stress-ng \
+                                --cpu \$HALF --cpu-load 50 \
+                                --vm 1 --vm-bytes 40% \
+                                --hdd 1 --hdd-bytes 128M \
+                                --timeout ${TEST_DURATION}s \
+                                > /tmp/stress.log 2>&1 &
+                        " 2>/dev/null &
+                    done
+                    wait
+
+                    sleep 20
+
+                    # Safety check combined
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        CPU=$(vagrant ssh $VM -c "top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.0f\", 100-\$8}'" 2>/dev/null | tail -1 || echo "0")
+                        RAM=$(vagrant ssh $VM -c "free | grep Mem | awk '{printf \"%.0f\", \$3/\$2*100}'" 2>/dev/null | tail -1 || echo "0")
+                        DISK=$(vagrant ssh $VM -c "df / | tail -1 | awk '{print \$5}' | tr -d '%'" 2>/dev/null | tail -1 || echo "0")
+                        echo "$VM — CPU:${CPU}% RAM:${RAM}% DISK:${DISK}%"
+                        if [ "$CPU" -gt "$MAX_CPU_PCT" ] || [ "$RAM" -gt "$MAX_RAM_PCT" ] || [ "$DISK" -gt "$MAX_DISK_PCT" ] 2>/dev/null; then
+                            echo "WARNING: $VM over safety limit — killing stress"
+                            vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; true" 2>/dev/null || true
+                        fi
+                    done
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== PEAK COMBINED METRICS ===" >> $WORKSPACE/$REPORT_FILE
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo 'CPU:        '$(top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.1f%%\", 100-\$8}')
+                            echo 'RAM:        '$(free | grep Mem | awk '{printf \"%.1f%%\", \$3/\$2*100}')
+                            echo 'Disk:       '$(df -h / | tail -1 | awk '{print \$5}')
+                            echo 'Load avg:   '$(cat /proc/loadavg | awk '{print \$1, \$2, \$3}')
+                            echo 'Steal time: '$(top -bn2 | grep Cpu | tail -1 | awk '{print \$16\"%\"}')
+                        " 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true &
+                    done
+                    wait
+                '''
+            }
+        }
+
+        stage('Production') {
+            steps {
+                echo 'Stage 5 — Cleanup + Recovery Report'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    # Kill any remaining stress processes
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; sudo pkill -f stress 2>/dev/null; true" 2>/dev/null &
+                    done
+                    wait
+
+                    # Wait for systems to recover
+                    sleep 15
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== POST-STRESS RECOVERY ===" >> $WORKSPACE/$REPORT_FILE
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo 'CPU:      '$(top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.1f%%\", 100-\$8}')
+                            echo 'RAM:      '$(free | grep Mem | awk '{printf \"%.1f%%\", \$3/\$2*100}')
+                            echo 'Load avg: '$(cat /proc/loadavg | awk '{print \$1, \$2, \$3}')
+                        " 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true &
+                    done
+                    wait
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    echo ""
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║      SAFE LOAD TEST RESULTS            ║"
+                    echo "╚════════════════════════════════════════╝"
+                    cat $WORKSPACE/$REPORT_FILE
+                '''
+                archiveArtifacts artifacts: 'load-test-report.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        always {
+            // Emergency cleanup on all VMs no matter what
+            sh '''
+                cd /home/ruairi/fyp-cluster 2>/dev/null || true
+                for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                    vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; true" 2>/dev/null &
+                done
+                wait
+                echo "Cleanup complete"
+            '''
+        }
+        success { echo 'Safe load test completed — check load-test-report.txt in artifacts' }
+        failure { echo 'Load test failed — all stress processes have been cleaned up' }
+    }
+}

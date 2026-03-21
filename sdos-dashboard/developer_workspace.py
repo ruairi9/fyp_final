@@ -2634,7 +2634,7 @@ def jenkins_request(path, method='GET', data=None):
     """Make a request to Jenkins API with crumb authentication"""
     import urllib.request, urllib.error, base64
     JENKINS_USER  = 'admin'
-    JENKINS_TOKEN = '119b0a43cfb46d628a7d35d0981b73fb38'
+    JENKINS_TOKEN = '119841289d2010c9d2b89611641fd17bef'
 
     creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
     headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/x-www-form-urlencoded'}
