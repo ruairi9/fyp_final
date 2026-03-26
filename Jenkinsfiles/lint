@@ -1,0 +1,181 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        VAGRANT_DIR   = '/home/ruairi/fyp-cluster'
+        GITHUB_REPO   = 'https://github.com/ruairi9/fyp.git'
+        LINT_REPORT   = 'lint-report.txt'
+    }
+
+    stages {
+
+        stage('Build') {
+            steps {
+                echo '============================================'
+                echo ' SDOS LINT PIPELINE'
+                echo ' Cloning repo and preparing worker-dev'
+                echo '============================================'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    echo "Lint Started: $(date)" > $WORKSPACE/$LINT_REPORT
+                    echo "Repo: $GITHUB_REPO" >> $WORKSPACE/$LINT_REPORT
+                    echo "Linter: flake8" >> $WORKSPACE/$LINT_REPORT
+                    echo "============================================" >> $WORKSPACE/$LINT_REPORT
+
+                    # Install flake8 on worker-dev
+                    echo "Installing flake8 on worker-dev..."
+                    vagrant ssh worker-dev -c "
+                        pip3 install flake8 --quiet --break-system-packages 2>/dev/null || \
+                        sudo apt-get install -y python3-flake8 -qq > /dev/null 2>&1
+                        flake8 --version
+                    " 2>/dev/null
+                    echo "flake8 ready"
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Cloning GitHub repo on worker-dev...'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== CLONING REPO ===" >> $WORKSPACE/$LINT_REPORT
+
+                    vagrant ssh worker-dev -c "
+                        # Clean any previous clone
+                        rm -rf /tmp/fyp-lint
+                        # Clone the repo
+                        git clone $GITHUB_REPO /tmp/fyp-lint 2>&1
+                        echo 'Clone complete'
+                        # List Python files found
+                        echo 'Python files found:'
+                        find /tmp/fyp-lint -name '*.py' | head -20
+                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== PYTHON FILES TO LINT ===" >> $WORKSPACE/$LINT_REPORT
+                    vagrant ssh worker-dev -c "
+                        find /tmp/fyp-lint -name '*.py' | wc -l
+                    " 2>/dev/null >> $WORKSPACE/$LINT_REPORT
+                '''
+            }
+        }
+
+        stage('Staging') {
+            steps {
+                echo 'Running flake8 lint checks...'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== FLAKE8 LINT RESULTS ===" >> $WORKSPACE/$LINT_REPORT
+
+                    # Run flake8 and capture results
+                    # --max-line-length=120 to allow slightly longer lines
+                    # --statistics shows count of each error type
+                    # --count shows total error count
+                    vagrant ssh worker-dev -c "
+                        cd /tmp/fyp-lint
+                        flake8 . \
+                            --max-line-length=120 \
+                            --exclude=__pycache__,.git,*.pyc \
+                            --statistics \
+                            --count \
+                            2>&1 || true
+                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== ERROR SUMMARY ===" >> $WORKSPACE/$LINT_REPORT
+
+                    # Count total errors
+                    ERROR_COUNT=$(vagrant ssh worker-dev -c "
+                        cd /tmp/fyp-lint
+                        flake8 . \
+                            --max-line-length=120 \
+                            --exclude=__pycache__,.git,*.pyc \
+                            --count --quiet 2>/dev/null || echo 0
+                    " 2>/dev/null | tail -1 | tr -d '[:space:]')
+
+                    echo "Total lint errors: $ERROR_COUNT" >> $WORKSPACE/$LINT_REPORT
+                    echo "Total lint errors: $ERROR_COUNT"
+
+                    # Save error count for next stage
+                    echo $ERROR_COUNT > /tmp/lint_error_count
+                '''
+            }
+        }
+
+        stage('Load') {
+            steps {
+                echo 'Checking lint results...'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== PER-FILE BREAKDOWN ===" >> $WORKSPACE/$LINT_REPORT
+
+                    # Show errors per file
+                    vagrant ssh worker-dev -c "
+                        cd /tmp/fyp-lint
+                        flake8 . \
+                            --max-line-length=120 \
+                            --exclude=__pycache__,.git,*.pyc \
+                            --format='%(path)s: %(row)d:%(col)d: %(code)s %(text)s' \
+                            2>/dev/null || true
+                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
+
+                    echo "" >> $WORKSPACE/$LINT_REPORT
+                    echo "=== LINT COMPLETE: $(date) ===" >> $WORKSPACE/$LINT_REPORT
+                '''
+            }
+        }
+
+        stage('Production') {
+            steps {
+                echo 'Final lint verdict...'
+                sh '''
+                    ERROR_COUNT=$(cat /tmp/lint_error_count 2>/dev/null | tr -d '[:space:]' || echo "0")
+
+                    echo ""
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║         LINT RESULTS SUMMARY           ║"
+                    echo "╚════════════════════════════════════════╝"
+                    echo ""
+
+                    cat $WORKSPACE/$LINT_REPORT
+
+                    echo ""
+                    if [ "$ERROR_COUNT" -eq "0" ] 2>/dev/null; then
+                        echo "✓ LINT PASSED — No errors found!"
+                    else
+                        echo "✗ LINT FAILED — $ERROR_COUNT error(s) found"
+                        echo "  Fix the errors shown above and push again"
+                        exit 1
+                    fi
+                '''
+                archiveArtifacts artifacts: 'lint-report.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up clone from worker-dev
+            sh '''
+                cd /home/ruairi/fyp-cluster 2>/dev/null || true
+                vagrant ssh worker-dev -c "rm -rf /tmp/fyp-lint 2>/dev/null; true" 2>/dev/null || true
+                rm -f /tmp/lint_error_count
+                echo "Lint workspace cleaned up"
+            '''
+        }
+        success {
+            echo 'Lint passed — code is clean!'
+        }
+        failure {
+            echo 'Lint failed — check lint-report.txt for details on which lines need fixing'
+        }
+    }
+}

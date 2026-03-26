@@ -1,0 +1,7 @@
+
+=== PRE-FLIGHT CHECKS ===
+control-plane: OK
+worker-dev: OK
+worker-prod: OK
+worker-cicd: OK
+worker-monitoring: OK
