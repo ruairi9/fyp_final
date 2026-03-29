@@ -282,17 +282,58 @@ EOF
                     echo "Production pods:"
                     kubectl --kubeconfig=$KUBECONFIG get pods -n production -l app=sdos-nginx
 
-                    # Final verification
+                    # Wait for service to be ready
                     sleep 5
-                    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.30:30082 --connect-timeout 10 || echo "000")
-                    echo "Production HTTP response: $HTTP_CODE"
 
-                    echo ""
                     echo "============================================"
-                    echo " DEPLOYMENT COMPLETE!"
+                    echo " Running production integration tests..."
+                    echo "============================================"
+
+                    PASS=0
+                    FAIL=0
+
+                    # Test 1: HTTP response
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.30:30082 --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ]; then
+                        echo "PASS: HTTP 200 response"
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: HTTP $CODE response"
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 2: Response contains expected content
+                    BODY=$(curl -s http://192.168.121.30:30082 --connect-timeout 10 || echo "")
+                    if echo "$BODY" | grep -qiE "nginx|html|welcome"; then
+                        echo "PASS: Response contains expected content"
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Unexpected response body"
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 3: Pod count
+                    PODS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n production -l app=sdos-nginx --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+                    echo "Running pods: $PODS"
+                    if [ "$PODS" -ge "1" ]; then
+                        echo "PASS: At least 1 pod running"
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: No pods running"
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    echo "============================================"
+                    echo "Production Tests: $PASS passed, $FAIL failed"
                     echo "  Dev:        http://192.168.121.20:30081"
                     echo "  Production: http://192.168.121.30:30082"
                     echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "WARNING: $FAIL production test(s) failed"
+                    else
+                        echo "DEPLOYMENT COMPLETE — all production tests passed!"
+                    fi
                 '''
             }
         }
