@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, redirect
 import subprocess
 import json
 import os
@@ -9,6 +9,20 @@ import urllib.request
 from datetime import datetime
 
 app = Flask(__name__)
+
+import json as _json_sess
+import os as _os_sess
+
+_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+
+def _get_session():
+    try:
+        if _os_sess.path.exists(_SESSION_FILE):
+            with open(_SESSION_FILE) as _f:
+                return _json_sess.load(_f)
+    except Exception:
+        pass
+    return {}
 
 def signal_handler(sig, frame):
     print('\n\n' + '='*60)
@@ -180,7 +194,6 @@ def get_pipeline_data():
             }
         }]
     
-    # Sort: RUNNING first, then FAILED, then COMPLETE
     STATUS_ORDER = {'RUNNING': 0, 'COMPLETE': 1, 'CANCELLED': 2, 'FAILED': 3, 'NO BUILDS': 4}
     pipelines.sort(key=lambda p: STATUS_ORDER.get(p['status'], 99))
 
@@ -236,8 +249,6 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
             transition: border-color 0.3s;
         }
 
-
-        
         .pipeline-header {
             display: flex;
             gap: 30px;
@@ -266,7 +277,6 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
         
         .pipeline-time { color: #94a3b8; font-size: 14px; }
 
-        /* RUNNING badge */
         .running-badge {
             background: #3b82f6;
             color: white;
@@ -325,6 +335,7 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
         <div class="header">
             <div class="header-left">
                 <a href="http://localhost:5000" class="btn btn-home">← Home</a>
+                <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background=\'#dc2626\';this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.background=\'#ef4444\';this.style.transform=\'translateY(0)\'">Logout</button>
                 <h1>Pipeline Dashboard</h1>
             </div>
             <div class="status-time" id="current-time">ON dd/mm/yy AT hh:mm</div>
@@ -336,19 +347,19 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
     <script>
         function updateTime() {
             const now = new Date();
-            const d = String(now.getDate()).padStart(2,'0');
-            const m = String(now.getMonth()+1).padStart(2,'0');
+            const d = String(now.getDate()).padStart(2,\'0\');
+            const m = String(now.getMonth()+1).padStart(2,\'0\');
             const y = String(now.getFullYear()).slice(-2);
-            const h = String(now.getHours()).padStart(2,'0');
-            const min = String(now.getMinutes()).padStart(2,'0');
-            document.getElementById('current-time').textContent = `ON ${d}/${m}/${y} AT ${h}:${min}`;
+            const h = String(now.getHours()).padStart(2,\'0\');
+            const min = String(now.getMinutes()).padStart(2,\'0\');
+            document.getElementById(\'current-time\').textContent = `ON ${d}/${m}/${y} AT ${h}:${min}`;
         }
         
         function renderStage(name, status) {
-            const cls = status === 'complete'   ? 'checked'
-                      : status === 'running'    ? 'running'
-                      : status === 'failed'     ? 'failed'
-                      : status === 'cancelled'  ? 'cancelled' : '';
+            const cls = status === \'complete\'   ? \'checked\'
+                      : status === \'running\'    ? \'running\'
+                      : status === \'failed\'     ? \'failed\'
+                      : status === \'cancelled\'  ? \'cancelled\' : \'\';
             return `<div class="stage">
                         <span class="stage-name">${name}</span>
                         <div class="stage-checkbox ${cls}"></div>
@@ -356,11 +367,11 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
         }
         
         function renderPipeline(pipeline) {
-            const statusClass = `status-${pipeline.status.toLowerCase().replace(/ /g, '-')}`;
-            const cardClass    = pipeline.status === 'RUNNING' ? 'card-running'
-                               : pipeline.status === 'FAILED'  ? 'card-failed' : '';
-            const badge = pipeline.status === 'RUNNING'
-                ? '<span class="running-badge">● LIVE</span>' : '';
+            const statusClass = `status-${pipeline.status.toLowerCase().replace(/ /g, \'-\')}`;
+            const cardClass    = pipeline.status === \'RUNNING\' ? \'card-running\'
+                               : pipeline.status === \'FAILED\'  ? \'card-failed\' : \'\';
+            const badge = pipeline.status === \'RUNNING\'
+                ? \'<span class="running-badge">● LIVE</span>\' : \'\';
 
             return `
                 <div class="pipeline-card ${cardClass}">
@@ -374,11 +385,11 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
                     <div class="stages-section">
                         <span class="stages-label">STAGES:</span>
                         <div class="stages-container">
-                            ${renderStage('BUILD',      pipeline.stages.build)}
-                            ${renderStage('TEST',       pipeline.stages.test)}
-                            ${renderStage('STAGING',    pipeline.stages.staging)}
-                            ${renderStage('LOAD',       pipeline.stages.load)}
-                            ${renderStage('PRODUCTION', pipeline.stages.production)}
+                            ${renderStage(\'BUILD\',      pipeline.stages.build)}
+                            ${renderStage(\'TEST\',       pipeline.stages.test)}
+                            ${renderStage(\'STAGING\',    pipeline.stages.staging)}
+                            ${renderStage(\'LOAD\',       pipeline.stages.load)}
+                            ${renderStage(\'PRODUCTION\', pipeline.stages.production)}
                         </div>
                     </div>
                     <div class="profile-section">
@@ -396,19 +407,33 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
         
         async function fetchPipelines() {
             try {
-                const response = await fetch('/api/pipeline-data');
+                const response = await fetch(\'/api/pipeline-data\');
                 const data = await response.json();
-                // Data is already sorted server-side: RUNNING → FAILED → COMPLETE
-                document.getElementById('pipelines-container').innerHTML =
-                    data.pipelines.map(p => renderPipeline(p)).join('');
+                document.getElementById(\'pipelines-container\').innerHTML =
+                    data.pipelines.map(p => renderPipeline(p)).join(\'\');
             } catch (error) {
-                console.error('Error fetching pipeline data:', error);
+                console.error(\'Error fetching pipeline data:\', error);
             }
         }
         
         updateTime();
         setInterval(updateTime, 1000);
+
+        async function logout() {
+            await fetch(\'http://localhost:5000/api/logout\', { method: \'POST\' });
+            window.location.href = \'http://localhost:5000\';
+        }
+
         fetchPipelines();
+        setInterval(async function() {
+            try {
+                const res = await fetch(\'http://localhost:5000/api/check-session\');
+                const data = await res.json();
+                if (!data.logged_in) {
+                    window.location.href = \'http://localhost:5000\';
+                }
+            } catch(e) {}
+        }, 30000);
         setInterval(fetchPipelines, 5000);
     </script>
 </body>
@@ -417,6 +442,8 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
 
 @app.route('/')
 def pipeline_dashboard():
+    if not _get_session().get("logged_in"):
+        return redirect("http://localhost:5000")
     return render_template_string(PIPELINE_DASHBOARD_TEMPLATE)
 
 @app.route('/api/pipeline-data')

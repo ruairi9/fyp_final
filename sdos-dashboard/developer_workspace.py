@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify, request, session
+from flask import Flask, render_template_string, jsonify, request, session, redirect
 import signal
 import sys
 import logging
@@ -10,6 +10,20 @@ import secrets
 import shutil
 from collections import defaultdict
 import re
+
+import json as _json_sess
+import os as _os_sess
+
+_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+
+def _get_session():
+    try:
+        if _os_sess.path.exists(_SESSION_FILE):
+            with open(_SESSION_FILE) as _f:
+                return _json_sess.load(_f)
+    except Exception:
+        pass
+    return {}
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
@@ -379,7 +393,7 @@ WORKSPACE_TEMPLATE = '''
 
         .left-panel {
             grid-column: 1;
-            grid-row: 1 / 3;       /* spans both rows */
+            grid-row: 1 / 3;
             background: #1e293b;
             border: 1px solid #334155;
             border-radius: 12px;
@@ -393,15 +407,17 @@ WORKSPACE_TEMPLATE = '''
             max-width: 600px;
         }
 
-        /* Drag handle — spans both rows, sits between col 1 and col 3 */
-        /* ── Horizontal resizer between editor and terminal ── */
         .row-resizer {
-            flex: 0 0 10px;
+            flex: 0 0 14px;
             cursor: row-resize;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: transparent;
+            background: #0f172a;
+            border-bottom: 1px solid #334155;
+            border-radius: 12px 12px 0 0;
+            margin: -15px -15px 10px -15px;
+            transition: background 0.2s;
         }
         .row-resizer::after {
             content: '';
@@ -412,6 +428,7 @@ WORKSPACE_TEMPLATE = '''
             border-radius: 2px;
             transition: background 0.2s;
         }
+        .row-resizer:hover, .row-resizer.dragging { background: rgba(59,130,246,0.2); }
         .row-resizer:hover::after, .row-resizer.dragging::after { background: #3b82f6; }
 
         .panel-resizer {
@@ -440,7 +457,6 @@ WORKSPACE_TEMPLATE = '''
             background: #60a5fa;
         }
 
-        /* Right column wrapper — flex column */
         .right-col {
             grid-column: 3;
             grid-row: 1;
@@ -473,9 +489,10 @@ WORKSPACE_TEMPLATE = '''
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             min-height: 80px;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         
-        /* All 3 resizable boxes in the left panel share this pattern */
         .info-section {
             background: #0f172a;
             border: 1px solid #334155;
@@ -523,7 +540,6 @@ WORKSPACE_TEMPLATE = '''
             scrollbar-gutter: stable;
         }
 
-        /* Shared drag handle for all 3 resizable left-panel boxes */
         .box-resizer {
             height: 8px;
             cursor: row-resize;
@@ -588,7 +604,6 @@ WORKSPACE_TEMPLATE = '''
         }
         .tree-commit-btn:hover { background: #d97706; }
 
-        /* Staged-for-creation files shown in yellow italic */
         .file-item.pending-create .file-label {
             color: #fbbf24;
             font-style: italic;
@@ -598,18 +613,15 @@ WORKSPACE_TEMPLATE = '''
             font-style: italic;
         }
 
-        /* Staged-for-deletion: folder headers get red strikethrough on their name */
         .subfolder-header.pending-delete .subfolder-name {
             text-decoration: line-through;
             color: #ef4444;
             opacity: 0.8;
         }
-        /* Also dim the action buttons on pending-delete folders */
         .subfolder-header.pending-delete .repo-action-btn {
             display: none;
         }
 
-        /* Staged-for-deletion files shown with strikethrough */
         .file-item.pending-delete .file-label {
             text-decoration: line-through;
             color: #ef4444;
@@ -621,7 +633,6 @@ WORKSPACE_TEMPLATE = '''
             opacity: 0.7;
         }
 
-        /* Delete button on file/folder rows — always visible, right-aligned */
         .delete-btn {
             background: transparent;
             border: none;
@@ -753,7 +764,6 @@ WORKSPACE_TEMPLATE = '''
         
         .subfolder.collapsed .subfolder-files { display: none; }
         
-        /* File items with drag handles */
         .file-item {
             padding: 6px 8px;
             padding-left: 8px;
@@ -773,7 +783,6 @@ WORKSPACE_TEMPLATE = '''
         
         .file-item.subfolder-file { padding-left: 20px; }
 
-        /* Drag handle */
         .drag-handle {
             cursor: grab;
             color: #334155;
@@ -798,7 +807,6 @@ WORKSPACE_TEMPLATE = '''
             white-space: nowrap;
         }
 
-        /* Drag-and-drop visual feedback */
         .file-item.dragging {
             opacity: 0.4;
             background: #1e293b;
@@ -810,7 +818,6 @@ WORKSPACE_TEMPLATE = '''
             border-bottom: 2px solid #60a5fa;
         }
 
-        /* Subfolder drag handle */
         .subfolder-drag {
             cursor: grab;
             color: #334155;
@@ -875,8 +882,6 @@ WORKSPACE_TEMPLATE = '''
             border-color: #60a5fa;
         }
         
-
-        
         .window-header {
             background: #0f172a;
             border: 1px solid #334155;
@@ -906,8 +911,6 @@ WORKSPACE_TEMPLATE = '''
             overflow: hidden;
         }
         
-
-        
         .command-header {
             background: #0f172a;
             border: 1px solid #334155;
@@ -926,7 +929,9 @@ WORKSPACE_TEMPLATE = '''
             padding: 15px;
             font-family: 'Courier New', monospace;
             font-size: 12px;
-            max-height: 100px;
+            flex: 1;
+            max-height: none;
+            overflow-y: auto;
             border-radius: 8px;
             overflow-y: auto;
         }
@@ -987,7 +992,6 @@ WORKSPACE_TEMPLATE = '''
         <div class="modal-content">
             <div class="modal-header">Create New Folder</div>
 
-            <!-- Mode selector -->
             <div class="folder-mode-tabs">
                 <div class="folder-mode-tab active" id="tab-empty" onclick="setFolderMode('empty')">
                     📁 Empty Folder
@@ -1010,7 +1014,6 @@ WORKSPACE_TEMPLATE = '''
                 <input type="text" id="new-folder-name" placeholder="my-folder">
             </div>
 
-            <!-- Only shown in "with-file" mode -->
             <div class="folder-with-file-section" id="folder-file-section">
                 <div class="form-group">
                     <label>File Name inside new folder</label>
@@ -1031,6 +1034,7 @@ WORKSPACE_TEMPLATE = '''
     <div class="header">
         <div class="header-left">
             <a href="http://localhost:5000" class="btn btn-home">← Home</a>
+            <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">Logout</button>
             <h1>Developer Workspace</h1>
         </div>
     </div>
@@ -1115,13 +1119,13 @@ $ </div>
         let githubRepos = [];
         let selectedRepoForNewFile = '';
         let selectedRepoForNewFolder = '';
-        let selectedFolderParentPath = '';  // '' = repo root, 'foldername' = inside that folder
-        let folderCreateMode = 'empty'; // 'empty' or 'with-file'
-        let pendingDeletes = {};       // { 'owner/repo': Set(['file/path']) }
-        let pendingStagedFolders = {}; // { 'owner/repo': Set(['folderName']) } whole folders staged for delete
-        let pendingCreates = [];   // [{ repo, path }] staged new files/folders not yet on GitHub
-        let pendingCreateFolders = {}; // { repo: Set(folderPath) } folders staged but not on GitHub yet
-        let lastSavedPath = '';    // tracks which file was last locally saved
+        let selectedFolderParentPath = '';
+        let folderCreateMode = 'empty';
+        let pendingDeletes = {};
+        let pendingStagedFolders = {};
+        let pendingCreates = [];
+        let pendingCreateFolders = {};
+        let lastSavedPath = '';
         
         require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
         
@@ -1138,9 +1142,27 @@ $ </div>
             });
             
             addTerminalLine('Monaco Editor initialized');
+
+            // Re-check session every 30 seconds — redirect if logged out
+            setInterval(async function() {
+                try {
+                    const res = await fetch('http://localhost:5000/api/check-session');
+                    const data = await res.json();
+                    if (!data.logged_in) {
+                        window.location.href = 'http://localhost:5000';
+                    }
+                } catch(e) {}
+            }, 30000);
+
             loadGithubRepos();
             loadPendingDeletes().then(() => loadFileList());
         });
+
+        // ── FIXED: redirect to home page instead of reloading ──
+        async function logout() {
+            await fetch('http://localhost:5000/api/logout', { method: 'POST' });
+            window.location.href = 'http://localhost:5000';
+        }
 
         // ─── Folder mode toggle ───────────────────────────────────────────
         function setFolderMode(mode) {
@@ -1166,7 +1188,6 @@ $ </div>
         function closeNewFileModal() {
             document.getElementById('new-file-modal').classList.remove('active');
         }
-        // parentPath: the subfolder the user clicked from, or '' for repo root
         function showNewFolderModal(repoName, parentPath) {
             selectedRepoForNewFolder = repoName;
             selectedFolderParentPath = parentPath || '';
@@ -1188,20 +1209,18 @@ $ </div>
             if (!filePath) { addTerminalLine('✗ Please enter a file path'); return; }
             if (!selectedRepoForNewFile) { addTerminalLine('✗ No repository selected'); return; }
 
-            // Stage locally — do NOT push to GitHub yet
             pendingCreates.push({ repo: selectedRepoForNewFile, path: filePath });
             closeNewFileModal();
             await loadFileList();
             addTerminalLine(`✓ Staged new file ${filePath} — hit Save All then Commit All to push`);
 
-            // Open in editor as empty new file (no GitHub load needed)
             const fileName = filePath.split('/').pop();
             editor.setValue('');
             currentFile = fileName;
             currentFilePath = filePath;
             currentSource = 'github';
             currentRepo = selectedRepoForNewFile;
-            currentSha = '';  // no SHA yet — file doesn't exist on GitHub
+            currentSha = '';
             document.getElementById('current-file').textContent = filePath + ' [' + selectedRepoForNewFile + '] (new - not yet committed)';
             document.getElementById('commit-btn').style.display = 'inline-block';
             const ext = fileName.split('.').pop();
@@ -1230,12 +1249,9 @@ $ </div>
                 targetPath = folderPath + '/.gitkeep';
             }
 
-            // Stage locally — do NOT push to GitHub yet
             pendingCreates.push({ repo: selectedRepoForNewFolder, path: targetPath, folderPath });
             closeNewFolderModal();
 
-            // Show the folder in the UI immediately by injecting a fake dir entry
-            // into the next loadFileList call via a local overlay
             pendingCreateFolders[selectedRepoForNewFolder] = pendingCreateFolders[selectedRepoForNewFolder] || new Set();
             pendingCreateFolders[selectedRepoForNewFolder].add(folderPath);
 
@@ -1368,7 +1384,6 @@ $ </div>
             });
         }
 
-        // Make a drag handle span — clicking the handle doesn't open the file
         function makeDragHandle() {
             const h = document.createElement('span');
             h.className = 'drag-handle';
@@ -1380,16 +1395,14 @@ $ </div>
         
         // ─── Build folder tree ────────────────────────────────────────────
         function buildFolderTree(files, repoName) {
-            const tree = {};       // { folderName: [file, ...] }
-            const rootFiles = [];  // files at repo root
+            const tree = {};
+            const rootFiles = [];
 
             files.forEach(file => {
                 if (file.type === 'dir') {
-                    // Ensure every dir entry creates a tree key so empty folders show
                     const folderName = file.path.split('/')[0];
                     if (!tree[folderName]) tree[folderName] = [];
                 } else if (file.type === 'file') {
-                    // Filter hidden placeholder files from view but keep folder alive
                     if (file.name === '.gitkeep' || file.name === '.keep') return;
                     const parts = file.path.split('/');
                     if (parts.length === 1) {
@@ -1426,14 +1439,12 @@ $ </div>
                         if (!grouped[file.repo]) grouped[file.repo] = [];
                         grouped[file.repo].push(file);
                     });
-                    // Inject pending-created folders as fake 'dir' entries so they show in UI
                     for (const [repo, folders] of Object.entries(pendingCreateFolders)) {
                         if (!grouped[repo]) grouped[repo] = [];
                         for (const fp of folders) {
                             grouped[repo].push({ name: fp.split('/').pop(), path: fp, repo, type: 'dir', pending: true });
                         }
                     }
-                    // Inject pending-created files as fake entries
                     for (const pc of pendingCreates) {
                         if (!grouped[pc.repo]) grouped[pc.repo] = [];
                         const name = pc.path.split('/').pop();
@@ -1479,7 +1490,6 @@ $ </div>
                         
                         const { tree, rootFiles } = buildFolderTree(grouped[repoName], repoName);
                         
-                        // Subfolders
                         Object.keys(tree).sort().forEach(folderName => {
                             const folderId = 'subfolder-' + repoName.replace(/\//g, '-') + '-' + folderName.replace(/\//g, '-');
                             
@@ -1492,14 +1502,12 @@ $ </div>
                             const folderIsPendingDel = isFolderPendingDelete(repoName, folderName);
                             subfolderHeader.className = 'subfolder-header' + (folderIsPendingCreate ? ' pending-create' : '') + (folderIsPendingDel ? ' pending-delete' : '');
 
-                            // Drag handle for subfolder
                             const sfHandle = document.createElement('span');
                             sfHandle.className = 'subfolder-drag';
                             sfHandle.textContent = '⠿';
                             sfHandle.title = 'Drag to reorder';
                             subfolderHeader.appendChild(sfHandle);
 
-                            // Explicit collapse arrow
                             const sfArrow = document.createElement('span');
                             sfArrow.className = 'subfolder-arrow';
                             sfArrow.textContent = '▼';
@@ -1514,7 +1522,6 @@ $ </div>
                             sfLabel.onclick = () => toggleSubfolder(folderId);
                             subfolderHeader.appendChild(sfLabel);
 
-                            // + Folder button inside subfolder (creates nested folder)
                             const sfFolderBtn = document.createElement('button');
                             sfFolderBtn.className = 'repo-action-btn';
                             sfFolderBtn.textContent = '+ Folder';
@@ -1525,7 +1532,6 @@ $ </div>
                             };
                             subfolderHeader.appendChild(sfFolderBtn);
 
-                            // + File button inside subfolder
                             const sfFileBtn = document.createElement('button');
                             sfFileBtn.className = 'repo-action-btn';
                             sfFileBtn.textContent = '+ File';
@@ -1539,7 +1545,6 @@ $ </div>
                             };
                             subfolderHeader.appendChild(sfFileBtn);
 
-                            // Delete/undo folder button
                             const sfDelBtn = document.createElement('button');
                             sfDelBtn.className = 'delete-btn';
                             if (folderIsPendingDel) {
@@ -1598,7 +1603,6 @@ $ </div>
                             filesContainer.appendChild(subfolderDiv);
                         });
                         
-                        // Root files
                         rootFiles.forEach(file => {
                             const fileDiv = document.createElement('div');
                             const isPendingDel = isFilePendingDelete(file.repo, file.path);
@@ -1748,6 +1752,14 @@ $ </div>
                 if (data.success) {
                     if (data.sha) currentSha = data.sha;
                     addTerminalLine(`✓ Pushed to ${currentRepo}`);
+                    fetch('/api/trigger-lint', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ repo: currentRepo })
+                    }).then(r => r.json()).then(d => {
+                        if (d.success) addTerminalLine(`✓ Lint triggered for ${currentRepo} — check Jenkins`);
+                        else addTerminalLine(`⚠ Could not trigger lint: ${d.error}`);
+                    }).catch(() => {});
                     showPipelineModal(currentRepo);
                 } else {
                     addTerminalLine(`✗ Error: ${data.error}`);
@@ -1780,7 +1792,6 @@ $ </div>
         }
         
         // ─── Pending deletes tracking ─────────────────────────────────────
-        // Keyed by repo -> set of paths staged for deletion
         async function loadPendingDeletes() {
             try {
                 const r = await fetch('/api/pending-deletes');
@@ -1789,7 +1800,6 @@ $ </div>
                 pendingStagedFolders = {};
                 for (const [repo, items] of Object.entries(data)) {
                     pendingDeletes[repo] = new Set(items.map(i => i.path));
-                    // A folder is staged if ALL items with folder_delete:true share a common folder prefix
                     pendingStagedFolders[repo] = new Set(
                         items.filter(i => i.folder_delete).map(i => i.path.split('/')[0])
                     );
@@ -1805,7 +1815,6 @@ $ </div>
             return pendingStagedFolders[repo] && pendingStagedFolders[repo].has(folderName);
         }
 
-        // ─── Undo a staged file delete ────────────────────────────────────
         async function unstageDelete(filepath, repo) {
             try {
                 const r = await fetch('/api/unstage-delete', {
@@ -1824,7 +1833,6 @@ $ </div>
             } catch(e) { addTerminalLine(`✗ Error: ${e.message}`); }
         }
 
-        // ─── Undo a staged folder delete ──────────────────────────────────
         async function unstageFolderDelete(folderName, repo) {
             try {
                 const r = await fetch('/api/unstage-folder-delete', {
@@ -1843,7 +1851,6 @@ $ </div>
             } catch(e) { addTerminalLine(`✗ Error: ${e.message}`); }
         }
 
-        // ─── Delete file (staged locally, not pushed yet) ─────────────────
         async function confirmDeleteFile(filepath, sha, repo) {
             const name = filepath.split('/').pop();
             if (!confirm(`Mark "${name}" for deletion?\n\nNothing changes on GitHub yet.\nHit Save All → then Commit All to apply.`)) return;
@@ -1870,7 +1877,6 @@ $ </div>
             } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
         }
 
-        // ─── Delete folder (staged locally, not pushed yet) ───────────────
         async function confirmDeleteFolder(folderName, repo) {
             if (!confirm(`Mark folder "${folderName}" and ALL its files for deletion?\n\nNothing changes on GitHub yet.\nHit Save All → then Commit All to apply.`)) return;
             addTerminalLine(`Staging folder ${folderName} for deletion...`);
@@ -1897,11 +1903,9 @@ $ </div>
             } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
         }
 
-        // ─── Save All (saves current editor content locally) ─────────────
         async function saveAllEdits() {
             let savedAnything = false;
 
-            // Save current open file locally if there is one
             if (currentFilePath) {
                 const content = editor.getValue();
                 try {
@@ -1921,7 +1925,6 @@ $ </div>
                 } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
             }
 
-            // Push any pending-created files/folders to GitHub now
             if (pendingCreates.length > 0) {
                 const toCreate = [...pendingCreates];
                 pendingCreates = [];
@@ -1935,21 +1938,19 @@ $ </div>
                         const d = await r.json();
                         if (d.success) {
                             addTerminalLine(`✓ Created ${pc.path} on GitHub`);
-                            // If it had a folderPath, clear from pendingCreateFolders
                             if (pc.folderPath && pendingCreateFolders[pc.repo]) {
                                 pendingCreateFolders[pc.repo].delete(pc.folderPath);
                             }
                             savedAnything = true;
                         } else {
                             addTerminalLine(`✗ Failed to create ${pc.path}: ${d.error}`);
-                            pendingCreates.push(pc); // put back if failed
+                            pendingCreates.push(pc);
                         }
                     } catch(e) { addTerminalLine(`✗ Error creating ${pc.path}: ${e.message}`); pendingCreates.push(pc); }
                 }
                 await loadFileList();
             }
 
-            // Report any pending deletes that are staged and ready to commit
             const pending = await (await fetch('/api/pending-deletes')).json();
             let stagedCount = 0;
             for (const items of Object.values(pending)) stagedCount += items.length;
@@ -1961,12 +1962,10 @@ $ </div>
             if (!savedAnything) { addTerminalLine('Nothing to save'); }
         }
 
-        // ─── Commit All: push file edits AND flush staged deletes ─────────
         async function commitAllEdits() {
             let didSomething = false;
             let fileContentWasPushed = false;
 
-            // 1. Push current file edit — only if user hit Save first
             if (currentFilePath && lastSavedPath === currentFilePath) {
                 const content = editor.getValue();
                 try {
@@ -1978,10 +1977,18 @@ $ </div>
                     const data = await response.json();
                     if (data.success) {
                         if (data.sha) currentSha = data.sha;
-                        lastSavedPath = '';  // clear after commit
+                        lastSavedPath = '';
                         addTerminalLine(`✓ Committed & pushed ${currentFile} to GitHub`);
                         didSomething = true;
                         fileContentWasPushed = true;
+                        fetch('/api/trigger-lint', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ repo: currentRepo })
+                        }).then(r => r.json()).then(d => {
+                            if (d.success) addTerminalLine(`✓ Lint triggered for ${currentRepo} — check Jenkins`);
+                            else addTerminalLine(`⚠ Could not trigger lint: ${d.error}`);
+                        }).catch(() => {});
                     } else {
                         addTerminalLine(`✗ Commit failed: ${data.error}`);
                     }
@@ -1990,7 +1997,6 @@ $ </div>
                 addTerminalLine(`⚠ ${currentFile} has unsaved changes — hit Save All first`);
             }
 
-            // 2. Flush all staged deletes for all repos
             const pending = await (await fetch('/api/pending-deletes')).json();
             for (const repo of Object.keys(pending)) {
                 if (!pending[repo] || pending[repo].length === 0) continue;
@@ -2013,11 +2019,10 @@ $ </div>
             if (!didSomething) { addTerminalLine('Nothing to commit'); }
             await loadPendingDeletes();
             await loadFileList();
-            // Only show pipeline modal if actual file content was edited and pushed
             if (fileContentWasPushed) { showPipelineModal(currentRepo); }
         }
 
-        // ─── Panel resizer — drag left edge of editor left/right ────────────
+        // ─── Panel resizer ────────────────────────────────────────────────
         (function() {
             const resizer = document.getElementById('panel-resizer');
             const container = resizer ? resizer.closest('.main-container') : null;
@@ -2049,7 +2054,7 @@ $ </div>
             });
         })();
 
-        // ─── Row resizer — drag between editor and terminal ─────────────
+        // ─── Row resizer ──────────────────────────────────────────────────
         (function() {
             const rowResizer = document.getElementById('row-resizer');
             const rightCol   = rowResizer ? rowResizer.closest('.right-col') : null;
@@ -2063,7 +2068,7 @@ $ </div>
                 document.body.style.cursor = 'row-resize';
                 document.body.style.userSelect = 'none';
                 function onMove(e) {
-                    const delta  = startY - e.clientY;  // drag up = bigger terminal
+                    const delta  = startY - e.clientY;
                     const totalH = rightCol.getBoundingClientRect().height;
                     const newH   = Math.max(80, Math.min(totalH - 150, startH + delta));
                     rightCol.style.setProperty('--terminal-height', newH + 'px');
@@ -2081,7 +2086,7 @@ $ </div>
             });
         })();
 
-        // ─── Box resizers — one handler for all 3 left-panel resizable boxes ──
+        // ─── Box resizers ─────────────────────────────────────────────────
         document.querySelectorAll('.box-resizer').forEach(resizer => {
             const targetId = resizer.getAttribute('data-target');
             const box = targetId ? document.getElementById(targetId) : null;
@@ -2095,8 +2100,6 @@ $ </div>
                 document.body.style.userSelect = 'none';
                 function onMove(e) {
                     const delta = e.clientY - startY;
-                    // Cap: can't be smaller than 50px, can't be larger than
-                    // the left panel height minus 150px (keeps other boxes visible)
                     const leftPanel = document.querySelector('.left-panel');
                     const panelH = leftPanel ? leftPanel.getBoundingClientRect().height : 800;
                     const maxH = Math.max(100, panelH - 100);
@@ -2121,7 +2124,7 @@ $ </div>
         function goToDashboard() { window.location.href = 'http://localhost:8080'; }
         function checkPipelines() { window.location.href = 'http://localhost:7000'; }
         
-        // ─── Jenkins Pipeline Modal logic ───────────────────────────────
+        // ─── Jenkins Pipeline Modal ───────────────────────────────────────
         let _pipelineRepo = null;
 
         async function showPipelineModal(repo) {
@@ -2130,8 +2133,9 @@ $ </div>
             status.textContent = '';
             document.getElementById('pipeline-name-input').value = '';
             document.getElementById('pipeline-existing-select').value = '';
+            const changeLabel = document.getElementById('pipeline-change-label');
+            if (changeLabel) changeLabel.style.display = 'none';
 
-            // Check if already linked
             const res  = await fetch('/api/get-pipeline-for-repo', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2145,23 +2149,34 @@ $ </div>
             const linkBtn         = document.getElementById('pipeline-modal-link');
 
             if (data.pipeline) {
-                // Already linked — just show it, no action needed
                 msg.textContent = `Repo "${repo}" is already linked to a Jenkins pipeline:`;
                 document.getElementById('pipeline-linked-name').textContent = '✓ ' + data.pipeline;
                 linkedSection.style.display   = 'block';
                 unlinkedSection.style.display = 'none';
                 linkBtn.textContent = 'Update Link';
-                linkBtn.style.background = '#22c55e';
-                // Also show unlinked section so user can re-link if they want
-                unlinkedSection.style.display = 'block';
-                // Pre-load existing Jenkins jobs into dropdown
-                loadJenkinsJobs();
+                linkBtn.style.background = '#f59e0b';
+                document.getElementById('run-pipeline-btn').style.display = 'inline-block';
+                document.getElementById('run-pipeline-btn').onclick = () => runLinkedPipeline(data.pipeline);
+                linkBtn.onclick = () => {
+                    const sec = document.getElementById('pipeline-unlinked-section');
+                    const changeLabel = document.getElementById('pipeline-change-label');
+                    if (sec.style.display === 'none') {
+                        sec.style.display = 'block';
+                        if (changeLabel) changeLabel.style.display = 'block';
+                        linkBtn.textContent = 'Confirm Update';
+                        linkBtn.style.background = '#3b82f6';
+                        loadJenkinsJobs();
+                    } else {
+                        linkPipeline();
+                    }
+                };
             } else {
                 msg.textContent = `Repo "${repo}" is not linked to a Jenkins pipeline yet. Pick an existing job or create a new empty one:`;
                 linkedSection.style.display   = 'none';
                 unlinkedSection.style.display = 'block';
                 linkBtn.textContent = 'Link Pipeline';
                 linkBtn.style.background = '#3b82f6';
+                document.getElementById('run-pipeline-btn').style.display = 'none';
                 loadJenkinsJobs();
                 setTimeout(() => document.getElementById('pipeline-name-input').focus(), 100);
             }
@@ -2195,6 +2210,32 @@ $ </div>
         function onNameInput() {
             const val = document.getElementById('pipeline-name-input').value.trim();
             if (val) document.getElementById('pipeline-existing-select').value = '';
+        }
+
+        async function runLinkedPipeline(pipelineName) {
+            const status = document.getElementById('pipeline-modal-status');
+            status.style.color = '#94a3b8';
+            status.textContent = `Triggering ${pipelineName}...`;
+            try {
+                const res  = await fetch('/api/run-pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pipeline: pipelineName })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    status.style.color = '#22c55e';
+                    status.textContent = `✓ Pipeline "${pipelineName}" triggered! Check Jenkins for results.`;
+                    addTerminalLine(`✓ Triggered pipeline: ${pipelineName}`);
+                    setTimeout(closePipelineModal, 2000);
+                } else {
+                    status.style.color = '#ef4444';
+                    status.textContent = `✗ Failed to trigger: ${data.error}`;
+                }
+            } catch(e) {
+                status.style.color = '#ef4444';
+                status.textContent = `✗ Error: ${e.message}`;
+            }
         }
 
         function closePipelineModal() {
@@ -2263,14 +2304,14 @@ $ </div>
                 <h3 style="color:#60a5fa;margin-bottom:6px;font-size:18px;">Link Jenkins Pipeline</h3>
                 <p id="pipeline-modal-msg" style="color:#94a3b8;font-size:13px;margin-bottom:20px;line-height:1.5;"></p>
 
-                <!-- Already linked: just show the name, no action needed -->
                 <div id="pipeline-linked-section" style="display:none;margin-bottom:18px;">
                     <div style="background:#0f172a;border:1px solid #22c55e;border-radius:6px;padding:10px 14px;color:#22c55e;font-size:13px;font-weight:600;" id="pipeline-linked-name"></div>
                 </div>
 
-                <!-- Not linked: choose existing or create new -->
+                <p id="pipeline-change-label" style="display:none;color:#f59e0b;font-size:12px;margin-bottom:10px;">
+                    ⚠ Pick a different pipeline or enter a new name to update the link:
+                </p>
                 <div id="pipeline-unlinked-section" style="display:none;margin-bottom:18px;">
-                    <!-- Fetch existing Jenkins jobs -->
                     <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">Pick an existing Jenkins pipeline:</label>
                     <select id="pipeline-existing-select"
                         style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:6px;
@@ -2292,6 +2333,10 @@ $ </div>
                     <button style="background:#334155;color:#94a3b8;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;"
                         onclick="closePipelineModal()">Skip
                     </button>
+                    <button id="run-pipeline-btn"
+                        style="display:none;background:#22c55e;color:white;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
+                        ▶ Run Pipeline
+                    </button>
                     <button id="pipeline-modal-link"
                         style="background:#3b82f6;color:white;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
                         onclick="linkPipeline()">Link Pipeline
@@ -2306,6 +2351,8 @@ $ </div>
 
 @app.route('/')
 def workspace():
+    if not _get_session().get("logged_in"):
+        return redirect("http://localhost:5000")
     return render_template_string(WORKSPACE_TEMPLATE)
 
 @app.route('/api/create-file', methods=['POST'])
@@ -2404,35 +2451,27 @@ def remove_github_repo():
 
 @app.route('/api/delete-file', methods=['POST'])
 def api_delete_file():
-    """Stage a file deletion locally. Does NOT touch GitHub until commit."""
     data = request.json
     filepath = data.get('filepath', '')
     sha      = data.get('sha', '')
     repo     = data.get('repo', '')
     if not filepath or not sha or not repo:
         return jsonify({'success': False, 'error': 'Missing fields'})
-
-    # Clear any unsaved local edit for this file
     edits = load_edits_from_file()
     file_key = f"{repo}:{filepath}"
     if file_key in edits:
         del edits[file_key]
         save_edits_to_file(edits)
-
-    # Stage the delete - do NOT call GitHub yet
     pending = load_pending_deletes()
     if repo not in pending:
         pending[repo] = []
-    # Avoid duplicates
     pending[repo] = [d for d in pending[repo] if d['path'] != filepath]
     pending[repo].append({'path': filepath, 'sha': sha, 'folder_delete': False})
     save_pending_deletes(pending)
-
     return jsonify({'success': True, 'staged': True})
 
 @app.route('/api/delete-folder', methods=['POST'])
 def api_delete_folder():
-    """Stage deletion of all files in a folder. Does NOT touch GitHub until commit."""
     data   = request.json
     folder = data.get('folder', '')
     repo   = data.get('repo', '')
@@ -2445,38 +2484,30 @@ def api_delete_folder():
             token = repo_config['token']
             owner = repo_config['owner']
             repo_name_only = repo_config['repo']
-            # Get all files currently in the folder from GitHub
             files = get_folder_files_with_sha(token, owner, repo_name_only, folder)
             if not files:
                 return jsonify({'success': False, 'error': 'Folder not found or already empty'})
-
-            # Stage all as pending deletes
             pending = load_pending_deletes()
             if repo not in pending:
                 pending[repo] = []
             for f in files:
-                # Clear any local edit
                 edits = load_edits_from_file()
                 file_key = f"{repo}:{f['path']}"
                 if file_key in edits:
                     del edits[file_key]
                     save_edits_to_file(edits)
-                # Stage
                 pending[repo] = [d for d in pending[repo] if d['path'] != f['path']]
                 pending[repo].append({'path': f['path'], 'sha': f['sha'], 'folder_delete': True})
             save_pending_deletes(pending)
-
             return jsonify({'success': True, 'staged': len(files), 'deleted': len(files)})
     return jsonify({'success': False, 'error': 'Repository not found'})
 
 @app.route('/api/pending-deletes', methods=['GET'])
 def api_get_pending_deletes():
-    """Return current staged deletions so the UI can show them."""
     return jsonify(load_pending_deletes())
 
 @app.route('/api/unstage-delete', methods=['POST'])
 def api_unstage_delete():
-    """Remove a single file from the pending-deletes list (undo staged delete)."""
     data = request.json
     filepath = data.get('filepath', '')
     repo     = data.get('repo', '')
@@ -2494,7 +2525,6 @@ def api_unstage_delete():
 
 @app.route('/api/unstage-folder-delete', methods=['POST'])
 def api_unstage_folder_delete():
-    """Remove all files under a folder from pending-deletes (undo folder staged delete)."""
     data   = request.json
     folder = data.get('folder', '')
     repo   = data.get('repo', '')
@@ -2503,7 +2533,6 @@ def api_unstage_folder_delete():
     pending = load_pending_deletes()
     if repo in pending:
         before = len(pending[repo])
-        # Remove all items that belong to this folder (path starts with folder/)
         pending[repo] = [d for d in pending[repo] if not d['path'].startswith(folder + '/') and d['path'] != folder]
         restored = before - len(pending[repo])
         if not pending[repo]:
@@ -2514,14 +2543,12 @@ def api_unstage_folder_delete():
 
 @app.route('/api/commit-deletes', methods=['POST'])
 def api_commit_deletes():
-    """Actually delete staged files from GitHub."""
     data = request.json
     repo = data.get('repo', '')
     pending = load_pending_deletes()
     items = pending.get(repo, [])
     if not items:
         return jsonify({'success': True, 'deleted': 0, 'message': 'Nothing to delete'})
-
     repos = load_repos_from_file()
     for repo_config in repos:
         repo_name = f"{repo_config['owner']}/{repo_config['repo']}"
@@ -2531,38 +2558,28 @@ def api_commit_deletes():
             repo_name_only = repo_config['repo']
             deleted = 0
             errors = []
-            # Track which folders had files deleted so we can keep them alive
             affected_folders = set()
             for item in items:
                 result = delete_github_file(token, owner, repo_name_only, item['path'], item['sha'])
                 if result['success']:
                     deleted += 1
-                    # Track parent folder
                     parts = item['path'].split('/')
                     if len(parts) > 1 and not item.get('folder_delete'):
                         affected_folders.add(parts[0])
                 else:
                     errors.append(item['path'])
-
-            # For file-only deletes: if the folder is now empty on GitHub,
-            # re-add .gitkeep so the folder survives
             for folder in affected_folders:
                 remaining = get_folder_files_with_sha(token, owner, repo_name_only, folder)
                 if not remaining:
                     create_github_file(token, owner, repo_name_only, f'{folder}/.gitkeep', '')
-
-            # Clear committed items from pending (keep any that failed)
             pending[repo] = [i for i in items if i['path'] in errors]
             if not pending[repo]:
                 del pending[repo]
             save_pending_deletes(pending)
-
             if errors:
                 return jsonify({'success': False, 'error': f"Failed: {', '.join(errors)}", 'deleted': deleted})
             return jsonify({'success': True, 'deleted': deleted})
-
     return jsonify({'success': False, 'error': 'Repository not found'})
-
 
 @app.route('/api/list-all-files')
 def list_all_files():
@@ -2617,7 +2634,9 @@ def save_file():
         save_edits_to_file(edits)
         return jsonify({'success': True})
 
-JENKINS_URL = "http://192.168.121.40:32080"
+JENKINS_URL   = "http://192.168.121.40:32080"
+JENKINS_USER  = "admin"
+JENKINS_TOKEN = "119841289d2010c9d2b89611641fd17bef"
 PIPELINE_MAPPINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pipeline_mappings.json')
 
 def load_pipeline_mappings():
@@ -2631,15 +2650,9 @@ def save_pipeline_mappings(mappings):
         json.dump(mappings, f, indent=2)
 
 def jenkins_request(path, method='GET', data=None):
-    """Make a request to Jenkins API with crumb authentication"""
     import urllib.request, urllib.error, base64
-    JENKINS_USER  = 'admin'
-    JENKINS_TOKEN = '119841289d2010c9d2b89611641fd17bef'
-
     creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
     headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/x-www-form-urlencoded'}
-
-    # Get Jenkins crumb for CSRF
     try:
         crumb_req = urllib.request.Request(
             f'{JENKINS_URL}/crumbIssuer/api/json',
@@ -2649,8 +2662,7 @@ def jenkins_request(path, method='GET', data=None):
             crumb_data = json.loads(r.read().decode())
             headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
     except Exception:
-        pass  # Some Jenkins configs don't need crumb
-
+        pass
     url = f'{JENKINS_URL}{path}'
     body = data.encode() if data else b''
     req  = urllib.request.Request(url, data=body, headers=headers, method=method)
@@ -2662,134 +2674,96 @@ def jenkins_request(path, method='GET', data=None):
     except Exception as e:
         return False, str(e)
 
-def create_jenkins_job(job_name, repo=''):
-    import urllib.request, urllib.error, urllib.parse, base64, json as _json
-    import xml.sax.saxutils as saxutils
-
-    JENKINS_USER  = 'admin'
-    JENKINS_TOKEN = '119b0a43cfb46d628a7d35d0981b73fb38'
-    github_url    = f'https://github.com/{repo}.git' if repo else ''
-
-    groovy_lines = [
-        "pipeline {",
-        "    agent any",
-        "    stages {",
-        "        stage('Build') {",
-        "            steps {",
-        "                echo 'Cloning " + repo + "...'",
-        "                sh 'rm -rf repo && git clone " + github_url + " repo'",
-        "                sh 'ls -la repo/'",
-        "            }",
-        "        }",
-        "        stage('Test') {",
-        "            steps {",
-        "                sh 'cd repo && find . -name \'*.py\' -exec python3 -m py_compile {} + && echo \'Syntax OK\' || echo \'Syntax errors found\''",
-        "            }",
-        "        }",
-        "        stage('Staging') {",
-        "            steps {",
-        "                sh 'cd repo && find . -name \'*.py\' | head -20'",
-        "            }",
-        "        }",
-        "        stage('Load') {",
-        "            steps {",
-        "                sh 'cd repo && find . -name *.py | wc -l'",
-        "            }",
-        "        }",
-        "        stage('Production') {",
-        "            steps {",
-        "                sh 'cd repo && git log -1 --oneline && echo \'Deployment complete\''",
-        "            }",
-        "        }",
-        "    }",
-        "    post {",
-        "        always { sh 'rm -rf repo || true' }",
-        "        success { echo 'Pipeline passed' }",
-        "        failure { echo 'Pipeline failed' }",
-        "    }",
-        "}",
-    ]
-    groovy = "\n".join(groovy_lines)
-    escaped_script = saxutils.escape(groovy)
-
-    job_xml = (
-        "<?xml version='1.1' encoding='UTF-8'?>\n"
-        '<flow-definition plugin="workflow-job">\n'
-        '  <description>Pipeline for ' + job_name + ' (' + repo + ')</description>\n'
-        '  <keepDependencies>false</keepDependencies>\n'
-        '  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">\n'
-        '    <script>' + escaped_script + '</script>\n'
-        '    <sandbox>true</sandbox>\n'
-        '  </definition>\n'
-        '</flow-definition>'
-    )
-
-    creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
-    headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/xml'}
-
-    try:
-        crumb_req = urllib.request.Request(
-            f'{JENKINS_URL}/crumbIssuer/api/json',
-            headers={'Authorization': f'Basic {creds}'}
-        )
-        with urllib.request.urlopen(crumb_req, timeout=5) as r:
-            crumb_data = _json.loads(r.read().decode())
-            headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
-    except Exception:
-        pass
-
-    url = f'{JENKINS_URL}/createItem?name={urllib.parse.quote(job_name)}'
-    req = urllib.request.Request(url, data=job_xml.encode('utf-8'), headers=headers, method='POST')
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return True, 'Created'
-    except urllib.error.HTTPError as e:
-        if e.code == 400:
-            return False, 'Job already exists'
-        body = e.read().decode()[:300]
-        return False, f'HTTP {e.code}: {body}'
-    except Exception as e:
-        return False, str(e)
-
-
 @app.route('/api/get-pipeline-for-repo', methods=['POST'])
 def get_pipeline_for_repo():
     try:
-        import urllib.request, base64, json as _json
+        import urllib.request, base64, json as _json, urllib.parse
         data     = request.get_json(force=True)
         repo     = data.get('repo', '')
         mappings = load_pipeline_mappings()
         pipeline = mappings.get(repo)
-
-        # If we have a saved mapping, verify the job still exists in Jenkins
         if pipeline:
             try:
-                JENKINS_USER  = 'admin'
-                JENKINS_TOKEN = '119b0a43cfb46d628a7d35d0981b73fb38'
                 creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
                 req = urllib.request.Request(
                     f'{JENKINS_URL}/job/{urllib.parse.quote(pipeline)}/api/json',
                     headers={'Authorization': f'Basic {creds}'}
                 )
                 with urllib.request.urlopen(req, timeout=5) as r:
-                    pass  # job exists
+                    pass
             except Exception:
-                # Job no longer exists in Jenkins — clear the stale mapping
                 del mappings[repo]
                 save_pipeline_mappings(mappings)
                 pipeline = None
-
         return jsonify({'pipeline': pipeline, 'repo': repo})
     except Exception as e:
         return jsonify({'pipeline': None, 'repo': '', 'error': str(e)})
 
+@app.route('/api/run-pipeline', methods=['POST'])
+def run_pipeline():
+    try:
+        import urllib.request, urllib.error, urllib.parse, base64, json as _json
+        data          = request.get_json(force=True)
+        pipeline_name = data.get('pipeline', '').strip()
+        if not pipeline_name:
+            return jsonify({'success': False, 'error': 'No pipeline name provided'})
+        creds   = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
+        headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/x-www-form-urlencoded'}
+        try:
+            crumb_req = urllib.request.Request(
+                f'{JENKINS_URL}/crumbIssuer/api/json',
+                headers={'Authorization': f'Basic {creds}'}
+            )
+            with urllib.request.urlopen(crumb_req, timeout=5) as r:
+                crumb_data = _json.loads(r.read().decode())
+                headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
+        except Exception:
+            pass
+        url = f'{JENKINS_URL}/job/{urllib.parse.quote(pipeline_name)}/build'
+        req = urllib.request.Request(url, data=b'', headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return jsonify({'success': True})
+        except urllib.error.HTTPError as e:
+            return jsonify({'success': False, 'error': f'HTTP {e.code}: {e.reason}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/trigger-lint', methods=['POST'])
+def trigger_lint():
+    try:
+        import urllib.request, urllib.error, urllib.parse, base64, json as _json
+        data = request.get_json(force=True)
+        repo = data.get('repo', '').strip()
+        if not repo:
+            return jsonify({'success': False, 'error': 'No repo provided'})
+        creds   = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
+        headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/x-www-form-urlencoded'}
+        try:
+            crumb_req = urllib.request.Request(
+                f'{JENKINS_URL}/crumbIssuer/api/json',
+                headers={'Authorization': f'Basic {creds}'}
+            )
+            with urllib.request.urlopen(crumb_req, timeout=5) as r:
+                crumb_data = _json.loads(r.read().decode())
+                headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
+        except Exception:
+            pass
+        params = urllib.parse.urlencode({'REPO': repo})
+        url = f'{JENKINS_URL}/job/lint/buildWithParameters?{params}'
+        req = urllib.request.Request(url, data=b'', headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return jsonify({'success': True})
+        except urllib.error.HTTPError as e:
+            return jsonify({'success': False, 'error': f'HTTP {e.code}: {e.reason}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/list-jenkins-jobs')
 def list_jenkins_jobs():
-    """Return all existing Jenkins job names"""
     try:
         import urllib.request, base64, json as _json
-        JENKINS_USER  = 'admin'
-        JENKINS_TOKEN = '119b0a43cfb46d628a7d35d0981b73fb38'
         creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
         req = urllib.request.Request(
             f'{JENKINS_URL}/api/json',
@@ -2804,23 +2778,16 @@ def list_jenkins_jobs():
 
 @app.route('/api/link-pipeline', methods=['POST'])
 def link_pipeline():
-    """Link a repo to a pipeline. If create_new=True, create an empty job in Jenkins first."""
     try:
         import urllib.request, urllib.error, urllib.parse, base64, json as _json
         data          = request.get_json(force=True)
         repo          = data.get('repo', '')
         pipeline_name = data.get('pipeline_name', '').strip()
         create_new    = data.get('create_new', False)
-
         if not pipeline_name:
             return jsonify({'success': False, 'error': 'No pipeline name provided'})
-
         job_name = re.sub(r'[^a-zA-Z0-9_-]', '-', pipeline_name).strip('-')
-
         if create_new:
-            # Create an EMPTY pipeline in Jenkins (user will fill in the script)
-            JENKINS_USER  = 'admin'
-            JENKINS_TOKEN = '119b0a43cfb46d628a7d35d0981b73fb38'
             empty_xml = (
                 "<?xml version='1.1' encoding='UTF-8'?>\n"
                 '<flow-definition plugin="workflow-job">\n'
@@ -2832,7 +2799,6 @@ def link_pipeline():
                 '  </definition>\n'
                 '</flow-definition>'
             )
-
             creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
             headers = {'Authorization': f'Basic {creds}', 'Content-Type': 'application/xml'}
             try:
@@ -2845,29 +2811,23 @@ def link_pipeline():
                     headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
             except Exception:
                 pass
-
             url = f'{JENKINS_URL}/createItem?name={urllib.parse.quote(job_name)}'
             req = urllib.request.Request(url, data=empty_xml.encode('utf-8'), headers=headers, method='POST')
             try:
                 with urllib.request.urlopen(req, timeout=10) as r:
-                    pass  # 200 = created
+                    pass
             except urllib.error.HTTPError as e:
-                if e.code != 400:  # 400 = already exists, that's fine
+                if e.code != 400:
                     body = e.read().decode()[:200]
                     return jsonify({'success': False, 'error': f'Could not create Jenkins job: HTTP {e.code}: {body}'})
-
-        # Save the mapping
         mappings = load_pipeline_mappings()
         mappings[repo] = job_name
         save_pipeline_mappings(mappings)
-
         action = 'Created and linked' if create_new else 'Linked'
         return jsonify({'success': True, 'message': f'{action} pipeline "{job_name}" to {repo}. You can now edit the script in Jenkins.'})
-
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)})
-
 
 if __name__ == '__main__':
     log = logging.getLogger('werkzeug')

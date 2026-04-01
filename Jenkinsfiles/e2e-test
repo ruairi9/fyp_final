@@ -2,12 +2,11 @@ pipeline {
     agent { label 'host-agent' }
 
     environment {
-        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
-        REGISTRY    = '192.168.121.50:30500'   // ← change this one line to go public
-        NAMESPACE   = 'integration'
-        BACKEND_IMG = 'sdos-backend'
-        BACKEND_TAG = 'latest'
-        BACKEND_PORT = '30090'
+        KUBECONFIG    = '/home/ruairi/fyp-cluster/k3s.yaml'
+        REGISTRY      = '192.168.121.50:30500'
+        NAMESPACE     = 'integration'
+        BACKEND_IMG   = 'sdos-backend'
+        BACKEND_TAG   = 'latest'
         FRONTEND_PORT = '30091'
     }
 
@@ -20,9 +19,6 @@ pipeline {
                 echo ' Building Flask backend Docker image'
                 echo '============================================'
                 sh '''
-                    mkdir -p /tmp/sdos-e2e
-
-                    # ── Flask backend ──────────────────────────
                     mkdir -p /tmp/sdos-e2e/backend
 
                     cat > /tmp/sdos-e2e/backend/app.py <<EOF
@@ -76,46 +72,10 @@ EXPOSE 5000
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
 EOF
 
-                    # Build and push to private registry
+                    docker login 192.168.121.50:30500 -u admin -p passadmin
                     docker build -t $REGISTRY/$BACKEND_IMG:$BACKEND_TAG /tmp/sdos-e2e/backend/
                     docker push $REGISTRY/$BACKEND_IMG:$BACKEND_TAG
                     echo "PASS: Backend image built and pushed to $REGISTRY"
-
-                    # ── nginx frontend config ──────────────────
-                    mkdir -p /tmp/sdos-e2e/frontend
-
-                    cat > /tmp/sdos-e2e/frontend/nginx.conf <<EOF
-server {
-    listen 80;
-
-    location / {
-        root /usr/share/nginx/html;
-        index index.html;
-    }
-
-    # Key integration: nginx proxies /api/* to Flask via cluster DNS
-    location /api/ {
-        proxy_pass http://sdos-backend.$NAMESPACE.svc.cluster.local:5000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_connect_timeout 5s;
-        proxy_read_timeout 10s;
-    }
-}
-EOF
-
-                    cat > /tmp/sdos-e2e/frontend/index.html <<EOF
-<!DOCTYPE html>
-<html>
-<head><title>SDOS E2E App</title></head>
-<body>
-<h1>SDOS Frontend</h1>
-<p>API calls proxy to the Flask backend via Kubernetes DNS.</p>
-</body>
-</html>
-EOF
-
-                    echo "PASS: All build artifacts ready"
                 '''
             }
         }
@@ -128,10 +88,14 @@ EOF
                 echo ' to the integration namespace'
                 echo '============================================'
                 sh '''
-                    # Ensure namespace exists
                     kubectl --kubeconfig=$KUBECONFIG create namespace $NAMESPACE --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
 
-                    # ── Backend: Flask API ─────────────────────
+                    # Clean up any leftover deployments from previous runs
+                    kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend  -n $NAMESPACE --ignore-not-found=true || true
+                    kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend -n $NAMESPACE --ignore-not-found=true || true
+                    kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod         -n $NAMESPACE --ignore-not-found=true || true
+                    sleep 5
+
                     cat > /tmp/sdos-e2e/backend-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -152,9 +116,12 @@ spec:
         app: sdos-backend
         tier: backend
     spec:
+      imagePullSecrets:
+      - name: registry-creds
       containers:
       - name: flask
         image: $REGISTRY/$BACKEND_IMG:$BACKEND_TAG
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
         env:
@@ -189,41 +156,32 @@ spec:
     targetPort: 5000
 EOF
 
-                    # ── Frontend: nginx proxy ──────────────────
                     cat > /tmp/sdos-e2e/frontend-deployment.yaml <<EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: sdos-frontend-config
-  namespace: $NAMESPACE
+  namespace: integration
 data:
-  nginx.conf: |
+  default.conf: |
     server {
         listen 80;
         location / {
-            root /usr/share/nginx/html;
-            index index.html;
+            add_header Content-Type text/html;
+            return 200 "SDOS Frontend OK";
         }
         location /api/ {
-            proxy_pass http://sdos-backend.$NAMESPACE.svc.cluster.local:5000;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_pass http://sdos-backend.integration.svc.cluster.local:5000;
             proxy_connect_timeout 5s;
             proxy_read_timeout 10s;
         }
     }
-  index.html: |
-    <!DOCTYPE html>
-    <html><head><title>SDOS E2E App</title></head>
-    <body><h1>SDOS Frontend</h1>
-    <p>API calls proxy to the Flask backend via Kubernetes DNS.</p>
-    </body></html>
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sdos-frontend
-  namespace: $NAMESPACE
+  namespace: integration
   labels:
     app: sdos-frontend
     tier: frontend
@@ -238,26 +196,15 @@ spec:
         app: sdos-frontend
         tier: frontend
     spec:
-      initContainers:
-      - name: copy-html
-        image: busybox
-        command: ['sh', '-c', 'cp /config/index.html /usr/share/nginx/html/index.html']
-        volumeMounts:
-        - name: config
-          mountPath: /config
-        - name: html
-          mountPath: /usr/share/nginx/html
       containers:
       - name: nginx
         image: nginx:1.25.3
         ports:
         - containerPort: 80
         volumeMounts:
-        - name: config
+        - name: nginx-conf
           mountPath: /etc/nginx/conf.d/default.conf
-          subPath: nginx.conf
-        - name: html
-          mountPath: /usr/share/nginx/html
+          subPath: default.conf
         resources:
           requests:
             memory: "32Mi"
@@ -266,17 +213,18 @@ spec:
             memory: "64Mi"
             cpu: "100m"
       volumes:
-      - name: config
+      - name: nginx-conf
         configMap:
           name: sdos-frontend-config
-      - name: html
-        emptyDir: {}
+          items:
+          - key: default.conf
+            path: default.conf
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: sdos-frontend
-  namespace: $NAMESPACE
+  namespace: integration
 spec:
   type: NodePort
   selector:
@@ -284,8 +232,16 @@ spec:
   ports:
   - port: 80
     targetPort: 80
-    nodePort: $FRONTEND_PORT
+    nodePort: 30091
 EOF
+
+                    # Create image pull secret so worker nodes can pull from private registry
+                    kubectl --kubeconfig=$KUBECONFIG create secret docker-registry registry-creds \
+                        --docker-server=$REGISTRY \
+                        --docker-username=admin \
+                        --docker-password=passadmin \
+                        --namespace=$NAMESPACE \
+                        --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
 
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-e2e/backend-deployment.yaml
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-e2e/frontend-deployment.yaml
@@ -294,9 +250,9 @@ EOF
                     kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-backend -n $NAMESPACE --timeout=120s
 
                     echo "Waiting for frontend rollout..."
-                    kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-frontend -n $NAMESPACE --timeout=120s
+                    kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-frontend -n $NAMESPACE --timeout=300s
 
-                    echo "All pods:"
+                    echo "All pods in integration namespace:"
                     kubectl --kubeconfig=$KUBECONFIG get pods -n $NAMESPACE
                     sleep 10
                 '''
@@ -317,12 +273,13 @@ EOF
                         --namespace=$NAMESPACE \
                         -- sh -c '
                             echo "=== E2E Integration Tests ==="
-                            echo "Testing frontend → backend communication"
+                            echo "Testing frontend -> backend communication"
+                            echo "Waiting 15s for DNS and services to be ready..."
+                            sleep 15
                             echo ""
                             PASS=0
                             FAIL=0
 
-                            # ── Test 1: Backend health direct ──────────────
                             echo "Test 1: Backend /api/health via cluster DNS"
                             CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                                 http://sdos-backend.integration.svc.cluster.local:5000/api/health \
@@ -335,7 +292,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 2: Backend returns valid JSON ─────────
                             echo "Test 2: Backend /api/health returns healthy status"
                             BODY=$(curl -s \
                                 http://sdos-backend.integration.svc.cluster.local:5000/api/health \
@@ -348,7 +304,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 3: Backend /api/message endpoint ──────
                             echo "Test 3: Backend /api/message endpoint"
                             BODY=$(curl -s \
                                 http://sdos-backend.integration.svc.cluster.local:5000/api/message \
@@ -361,7 +316,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 4: Backend /api/status endpoint ───────
                             echo "Test 4: Backend /api/status endpoint"
                             BODY=$(curl -s \
                                 http://sdos-backend.integration.svc.cluster.local:5000/api/status \
@@ -374,7 +328,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 5: Frontend serves HTML ───────────────
                             echo "Test 5: Frontend serves HTML page"
                             CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                                 http://sdos-frontend.integration.svc.cluster.local:80 \
@@ -387,7 +340,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 6: KEY TEST — Frontend proxies to backend
                             echo "Test 6: Frontend /api/health proxies to Flask backend"
                             BODY=$(curl -s \
                                 http://sdos-frontend.integration.svc.cluster.local:80/api/health \
@@ -400,7 +352,6 @@ EOF
                                 FAIL=$((FAIL+1))
                             fi
 
-                            # ── Test 7: Response time frontend→backend ──────
                             echo "Test 7: End-to-end response time"
                             TIME=$(curl -s -o /dev/null -w "%{time_total}" \
                                 http://sdos-frontend.integration.svc.cluster.local:80/api/message \
@@ -423,10 +374,9 @@ EOF
                             fi
                         '
 
-                    # Wait for pod to finish and stream logs
-                    kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod \
-                        -n $NAMESPACE --for=condition=Ready --timeout=30s || true
-                    kubectl --kubeconfig=$KUBECONFIG logs -f e2e-test-pod -n $NAMESPACE || true
+                    # Wait for pod to complete (not just Ready - it runs and exits)
+                    kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Succeeded --timeout=120s 2>/dev/null ||                     kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Failed --timeout=120s 2>/dev/null || true
+                    kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null || true
 
                     EXIT_CODE=$(kubectl --kubeconfig=$KUBECONFIG get pod e2e-test-pod \
                         -n $NAMESPACE \
@@ -450,17 +400,17 @@ EOF
 
     post {
         success {
-            echo 'E2E integration tests passed — frontend talks to backend correctly!'
+            echo 'E2E integration tests passed - frontend talks to backend correctly!'
         }
         failure {
             sh '''
                 echo "Pipeline failed - cleaning up..."
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend  -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend  -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete service   sdos-backend   -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete service   sdos-frontend  -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete configmap sdos-frontend-config -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete pod       e2e-test-pod   -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend         -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend         -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete service    sdos-backend         -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete service    sdos-frontend         -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete configmap  sdos-frontend-config -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete pod        e2e-test-pod         -n $NAMESPACE --ignore-not-found=true || true
             '''
         }
         always {

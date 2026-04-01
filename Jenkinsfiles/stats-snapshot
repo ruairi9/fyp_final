@@ -1,0 +1,119 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
+        VAGRANT_DIR = '/home/ruairi/fyp-cluster'
+        REPORT_FILE = 'stats-snapshot-report.txt'
+    }
+
+    stages {
+
+        stage('Host Stats') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 1 — HOST MACHINE STATS'
+                echo ' Capturing all dashboard values from host'
+                echo '============================================'
+                sh '''
+                    echo "SDOS Stats Snapshot — $(date)" > $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== HOST — RAM STATUS ===" >> $REPORT_FILE
+
+                    free -m | awk 'NR==2{
+                        printf "Total RAM Usage:   %.1f%%\n", ($3/$2)*100
+                        printf "Available Memory:  %.1f%%\n", ($7/$2)*100
+                    }' >> $REPORT_FILE
+
+                    free -m | awk 'NR==3{
+                        if ($2>0) printf "Swap Usage:        %.1f%%\n", ($3/$2)*100
+                        else print "Swap Usage:        0%"
+                    }' >> $REPORT_FILE
+
+                    awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{
+                        printf "Page Faults Total: %d\n", (pf+pmf)/1000
+                    }' /proc/vmstat >> $REPORT_FILE
+
+                    awk '/oom_kill/{print "OOM Events:        "$2}' /proc/vmstat >> $REPORT_FILE
+
+                    perf stat -e cache-misses -a sleep 0.1 2>&1 | awk '/cache-misses/{
+                        gsub(",","",$1)
+                        printf "Cache Faults:      %d\n", $1/1000
+                    }' >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== HOST — CPU STATUS ===" >> $REPORT_FILE
+
+                    mpstat 1 1 | awk '/Average/{
+                        printf "CPU Utilisation:   %.1f%%\n", 100-$NF
+                        printf "CPU Steal Time:    %.1f%%\n", $9
+                        printf "I/O Waits:         %.1f%%\n", $6
+                    }' >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== HOST — DISK & STORAGE (no disk usage) ===" >> $REPORT_FILE
+
+                    iostat -x 1 1 | awk '/^nvme/{
+                        printf "I/O Throughput:    %.2f MB/s\n", ($3+$9)/1024
+                        printf "Disk IOPS:         %.1f/sec\n", $2+$8
+                        printf "Disk Latency:      %.2f ms\n", $6
+                    }' >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== CLUSTER ===" >> $REPORT_FILE
+                    kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | wc -l | awk '{print "Total PODs: "$1}' >> $REPORT_FILE
+                    kubectl --kubeconfig=$KUBECONFIG config get-contexts --no-headers | wc -l | awk '{print "Clusters:   "$1}' >> $REPORT_FILE
+
+                    cat $REPORT_FILE
+                '''
+            }
+        }
+
+        stage('VM Stats') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 2 — VM LIST STATS'
+                echo ' Capturing stats from all 5 VMs'
+                echo '============================================'
+                sh '''
+                    cd $VAGRANT_DIR
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== VM LIST ===" >> $WORKSPACE/$REPORT_FILE
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "
+                            echo -n 'vCPU %:     '
+                            top -bn2 | grep 'Cpu' | tail -1 | awk '{printf \"%.1f%%\n\", 100-\$8}'
+                            echo -n 'RAM %:      '
+                            free -m | awk 'NR==2{printf \"%.1f%%\n\", (\$3/\$2)*100}'
+                            echo -n 'Steal Time: '
+                            top -bn1 | grep 'Cpu' | awk '{printf \"%.1f%%\n\", \$9}'
+                            echo -n 'Disk I/O:   '
+                            iostat -d -m 1 2 | grep vda | head -1 | awk '{printf \"%.2f MB/s\n\", \$3+\$4}'
+                        " 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE
+                        echo "" >> $WORKSPACE/$REPORT_FILE
+                    done
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== SNAPSHOT COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    echo ""
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║         STATS SNAPSHOT REPORT          ║"
+                    echo "╚════════════════════════════════════════╝"
+                    cat $WORKSPACE/$REPORT_FILE
+                '''
+                archiveArtifacts artifacts: 'stats-snapshot-report.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success { echo 'Snapshot complete — check stats-snapshot-report.txt in artifacts' }
+        failure { echo 'Snapshot failed' }
+    }
+}

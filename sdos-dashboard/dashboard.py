@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, redirect
 import subprocess
 import json
 import time
@@ -23,6 +23,20 @@ KUBECONFIG_PATH = os.path.expanduser('~/fyp-cluster/k3s.yaml')
 cpu_history = []
 memory_history = []
 disk_history = []
+
+import json as _json_sess
+import os as _os_sess
+
+_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+
+def _get_session():
+    try:
+        if _os_sess.path.exists(_SESSION_FILE):
+            with open(_SESSION_FILE) as _f:
+                return _json_sess.load(_f)
+    except Exception:
+        pass
+    return {}
 
 def signal_handler(sig, frame):
     print('\n\n' + '='*60)
@@ -200,24 +214,15 @@ DASHBOARD_TEMPLATE = """
         .btn-home { background: #64748b; }
         .btn-home:hover { background: #475569; }
         .chart-container { height: 200px; background: #0f172a; border-radius: 10px; padding: 15px; margin-top: 10px; position: relative; }
-        .tb-btn {
-            background: #1e293b; color: #94a3b8; border: 1px solid #334155;
-            padding: 5px 12px; border-radius: 6px; cursor: pointer;
-            font-size: 12px; font-weight: 600; transition: all 0.2s;
-        }
+        .tb-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
         .tb-btn:hover { border-color: #60a5fa; color: #e2e8f0; }
         .tb-btn.active { background: #1e3a5f; border-color: #60a5fa; color: #60a5fa; }
         .tb-btn.active-running   { background: #1e3a5f; border-color: #3b82f6; color: #3b82f6; }
         .tb-btn.active-success   { background: #052e16; border-color: #22c55e; color: #22c55e; }
         .tb-btn.active-cancelled { background: #451a03; border-color: #f59e0b; color: #f59e0b; }
-        .tb-btn.active-failure    { background: #3b0000; border-color: #ef4444; color: #ef4444; }
-        .tb-btn.active-no-builds  { background: #1a1a3e; border-color: #818cf8; color: #818cf8; }
-        .tb-clear-btn {
-            background: #1e293b; color: #94a3b8;
-            border: 1px solid #334155;
-            padding: 5px 12px; border-radius: 6px; cursor: pointer;
-            font-size: 12px; font-weight: 600; transition: all 0.2s;
-        }
+        .tb-btn.active-failure   { background: #3b0000; border-color: #ef4444; color: #ef4444; }
+        .tb-btn.active-no-builds { background: #1a1a3e; border-color: #818cf8; color: #818cf8; }
+        .tb-clear-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
         .tb-clear-btn:hover { border-color: #60a5fa; color: #e2e8f0; }
     </style>
 </head>
@@ -226,6 +231,7 @@ DASHBOARD_TEMPLATE = """
         <div class="header">
             <div class="header-left">
                 <a href="http://localhost:5000" class="btn btn-home">← Home</a>
+                <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">Logout</button>
                 <h1>SDOS Dashboard</h1>
             </div>
         </div>
@@ -267,40 +273,36 @@ DASHBOARD_TEMPLATE = """
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
                 <button class="tb-btn" id="btn-build-desc" onclick="setSort('desc')">Most Builds</button>
                 <button class="tb-btn" id="btn-build-asc"  onclick="setSort('asc')">Least Builds</button>
-
                 <div style="width:1px;height:22px;background:#334155;margin:0 4px;"></div>
-
                 <button class="tb-btn" id="filter-RUNNING"   onclick="setFilter('RUNNING')">Running</button>
                 <button class="tb-btn" id="filter-SUCCESS"   onclick="setFilter('SUCCESS')">Success</button>
                 <button class="tb-btn" id="filter-CANCELLED" onclick="setFilter('CANCELLED')">Cancelled</button>
                 <button class="tb-btn" id="filter-FAILURE"   onclick="setFilter('FAILURE')">Failure</button>
-                <button class="tb-btn" id="filter-NOBUILDS" onclick="setFilter('NO BUILDS')">No Builds</button>
-
+                <button class="tb-btn" id="filter-NOBUILDS"  onclick="setFilter('NO BUILDS')">No Builds</button>
                 <div style="width:1px;height:22px;background:#334155;margin:0 4px;"></div>
                 <button class="tb-clear-btn" onclick="clearControls()">Clear Filter</button>
             </div>
             <table>
                 <thead><tr>
-                    <th>Pipeline Name</th>
-                    <th>Last Build</th>
-                    <th>Status</th>
-                    <th>Link</th>
+                    <th>Pipeline Name</th><th>Last Build</th><th>Status</th><th>Link</th>
                 </tr></thead>
                 <tbody id="jenkins-table"></tbody>
             </table>
         </div>
     </div>
     <script>
-        setInterval(fetchData, 5000);
+        setInterval(fetchData, 3000);
 
-        // ── Sort / Filter state ────────────────────────────────────────
-        let sortDir      = null;   // null | 1 (asc) | -1 (desc)
-        let activeFilters = new Set();  // multiple filters can be active
+        async function logout() {
+            await fetch('http://localhost:5000/api/logout', { method: 'POST' });
+            window.location.href = 'http://localhost:5000';
+        }
+
+        let sortDir = null;
+        let activeFilters = new Set();
         let cachedJobs = [];
 
         function setSort(dir) {
-            // dir = 'asc' | 'desc'
-            // clicking the already-active button clears the sort
             if ((dir === 'asc' && sortDir === 1) || (dir === 'desc' && sortDir === -1)) {
                 sortDir = null;
             } else {
@@ -314,13 +316,7 @@ DASHBOARD_TEMPLATE = """
         const FILTER_CLS = { RUNNING:'active-running', SUCCESS:'active-success', CANCELLED:'active-cancelled', FAILURE:'active-failure', 'NO BUILDS':'active-no-builds' };
 
         function setFilter(status) {
-            // Toggle: clicking active filter removes it, clicking inactive adds it
-            if (activeFilters.has(status)) {
-                activeFilters.delete(status);
-            } else {
-                activeFilters.add(status);
-            }
-            // Update button highlights
+            if (activeFilters.has(status)) { activeFilters.delete(status); } else { activeFilters.add(status); }
             ['RUNNING','SUCCESS','CANCELLED','FAILURE','NO BUILDS'].forEach(s => {
                 const btnId = s === 'NO BUILDS' ? 'filter-NOBUILDS' : 'filter-' + s;
                 const btn = document.getElementById(btnId);
@@ -346,15 +342,8 @@ DASHBOARD_TEMPLATE = """
         function renderJenkinsTable(jobs) {
             const tbody = document.getElementById('jenkins-table');
             if (!jobs || jobs.length === 0) return;
-
-            // Filter — show job if it matches ANY active filter (or no filters active)
             let display = activeFilters.size === 0 ? [...jobs]
-                : jobs.filter(j => {
-                    return activeFilters.has(j.status) ||
-                           (activeFilters.has('FAILURE') && j.status === 'FAILED');
-                });
-
-            // Sort by build number if active
+                : jobs.filter(j => activeFilters.has(j.status) || (activeFilters.has('FAILURE') && j.status === 'FAILED'));
             if (sortDir !== null) {
                 display.sort((a, b) => {
                     const aNum = a.lastBuild === 'N/A' ? -1 : parseInt(a.lastBuild);
@@ -362,7 +351,6 @@ DASHBOARD_TEMPLATE = """
                     return (aNum - bNum) * sortDir;
                 });
             }
-
             tbody.innerHTML = '';
             if (display.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#475569;padding:20px;">No pipelines match this filter</td></tr>';
@@ -391,15 +379,10 @@ DASHBOARD_TEMPLATE = """
             if(range<3){const c=(maxV+minV)/2;dMin=Math.max(0,c-2.5);dMax=c+2.5;}
             else{dMin=Math.max(0,minV-range*0.2);dMax=maxV+range*0.2;}
             const dR=dMax-dMin;
-            const pts=data.map((v,i)=>{
-                const x=pL+(i/(data.length-1))*gW;
-                const y=pT+gH-((v-dMin)/dR)*gH;
-                return x+','+y;
-            }).join(' ');
+            const pts=data.map((v,i)=>{ const x=pL+(i/(data.length-1))*gW; const y=pT+gH-((v-dMin)/dR)*gH; return x+','+y; }).join(' ');
             let labels='',grid='';
             for(let i=0;i<=4;i++){
-                const v=dMin+(dR*i/4);
-                const y=pT+gH-(i/4)*gH;
+                const v=dMin+(dR*i/4); const y=pT+gH-(i/4)*gH;
                 labels+=`<text x="${pL-5}" y="${y+4}" text-anchor="end" font-size="10" fill="#64748b">${v.toFixed(1)}%</text>`;
                 grid+=`<line x1="${pL}" y1="${y}" x2="${pL+gW}" y2="${y}" stroke="#334155" stroke-width="1" stroke-dasharray="3,3"/>`;
             }
@@ -435,10 +418,10 @@ DASHBOARD_TEMPLATE = """
                         const latV  = s.latency != null ? s.latency         + 'ms' : 'N/A';
                         grid.innerHTML +=
                             `<div class="server-card"><h4>${s.name}</h4>` +
-                            `<div class="metric ${s.cpu>70?'high':''}"><b>CPU:</b>    <span>${cpuV}</span></div>` +
-                            `<div class="metric ${s.ram>80?'high':''}"><b>RAM:</b>    <span>${ramV}</span></div>` +
-                            `<div class="metric ${s.disk>85?'high':''}"><b>DISK:</b>  <span>${diskV}</span></div>` +
-                            `<div class="metric"><b>PING:</b>   <span>${latV}</span></div>` +
+                            `<div class="metric ${s.cpu>70?'high':''}"><b>CPU:</b> <span>${cpuV}</span></div>` +
+                            `<div class="metric ${s.ram>80?'high':''}"><b>RAM:</b> <span>${ramV}</span></div>` +
+                            `<div class="metric ${s.disk>85?'high':''}"><b>DISK:</b> <span>${diskV}</span></div>` +
+                            `<div class="metric"><b>PING:</b> <span>${latV}</span></div>` +
                             `<div class="metric"><b>STATUS:</b> <span class="status-success">${s.status}</span></div></div>`;
                     });
                 }
@@ -449,7 +432,16 @@ DASHBOARD_TEMPLATE = """
                 }
             } catch(e) { console.error(e); }
         }
+
         fetchData();
+
+        setInterval(async function() {
+            try {
+                const res = await fetch('http://localhost:5000/api/check-session');
+                const data = await res.json();
+                if (!data.logged_in) window.location.href = 'http://localhost:5000';
+            } catch(e) {}
+        }, 30000);
     </script>
 </body>
 </html>
@@ -457,6 +449,8 @@ DASHBOARD_TEMPLATE = """
 
 @app.route('/')
 def dashboard():
+    if not _get_session().get("logged_in"):
+        return redirect("http://localhost:5000")
     return render_template_string(DASHBOARD_TEMPLATE)
 
 @app.route('/api/data')
@@ -493,8 +487,8 @@ def get_data():
         if len(cpu_history)    > 20: cpu_history.pop(0)
         if len(memory_history) > 20: memory_history.pop(0)
         if len(disk_history)   > 20: disk_history.pop(0)
-        running_pods = sum(1 for pod in pods_data.get('items',[]) if pod['status']['phase']=='Running')
-        jenkins_jobs = scrape_jenkins_all_jobs()
+        running_pods  = sum(1 for pod in pods_data.get('items',[]) if pod['status']['phase']=='Running')
+        jenkins_jobs  = scrape_jenkins_all_jobs()
         return jsonify({
             'health_status':      'OK' if servers else 'NOK',
             'active_servers':     len(servers),

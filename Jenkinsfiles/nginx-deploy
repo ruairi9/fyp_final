@@ -2,12 +2,14 @@ pipeline {
     agent { label 'host-agent' }
 
     environment {
-        KUBECONFIG    = '/home/ruairi/fyp-cluster/k3s.yaml'
-        APP_NAME      = 'sdos-nginx'
-        DEV_NAMESPACE = 'development'
-        PRD_NAMESPACE = 'production'
-        DEV_PORT      = '30081'
-        PRD_PORT      = '30082'
+        KUBECONFIG      = '/home/ruairi/fyp-cluster/k3s.yaml'
+        APP_NAME        = 'sdos-nginx'
+        DEV_NAMESPACE   = 'development'
+        STG_NAMESPACE   = 'staging'
+        PRD_NAMESPACE   = 'production'
+        DEV_PORT        = '30081'
+        STG_PORT        = '30083'
+        PRD_PORT        = '30082'
     }
 
     stages {
@@ -74,6 +76,59 @@ spec:
     nodePort: 30081
 EOF
 
+                    # Staging deployment manifest (separate namespace, separate workload)
+                    cat > /tmp/sdos-nginx/stg-deployment.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sdos-nginx-stg
+  namespace: staging
+  labels:
+    app: sdos-nginx
+    env: staging
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sdos-nginx
+      env: staging
+  template:
+    metadata:
+      labels:
+        app: sdos-nginx
+        env: staging
+    spec:
+      nodeSelector:
+        node-role: integration
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sdos-nginx-stg
+  namespace: staging
+spec:
+  type: NodePort
+  selector:
+    app: sdos-nginx
+    env: staging
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30083
+EOF
+
                     # Production deployment manifest
                     cat > /tmp/sdos-nginx/prod-deployment.yaml <<EOF
 apiVersion: apps/v1
@@ -127,9 +182,7 @@ spec:
     nodePort: 30082
 EOF
 
-                    echo "Manifests created successfully"
-                    echo "Dev manifest:"
-                    cat /tmp/sdos-nginx/dev-deployment.yaml
+                    echo "All manifests created successfully"
                 '''
             }
         }
@@ -141,22 +194,15 @@ EOF
                 echo ' Deploying nginx to worker-dev'
                 echo '============================================'
                 sh '''
-                    # Ensure namespace exists
                     kubectl --kubeconfig=$KUBECONFIG create namespace development --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
-
-                    # Deploy to dev
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/dev-deployment.yaml
 
-                    # Wait for rollout
                     echo "Waiting for dev deployment to be ready..."
                     kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-nginx-dev -n development --timeout=120s
 
-                    # Show pods
                     echo "Dev pods:"
                     kubectl --kubeconfig=$KUBECONFIG get pods -n development -l app=sdos-nginx
 
-                    # Test the endpoint
-                    echo "Testing dev endpoint..."
                     sleep 5
                     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.20:30081 --connect-timeout 10 || echo "000")
                     echo "HTTP response code: $HTTP_CODE"
@@ -173,48 +219,83 @@ EOF
             steps {
                 echo '============================================'
                 echo ' STAGE 3 — STAGING'
-                echo ' Running integration tests on worker-dev'
+                echo ' Deploying to dedicated staging namespace'
+                echo ' Running test pod inside Kubernetes cluster'
                 echo '============================================'
                 sh '''
-                    echo "Running integration tests against dev deployment..."
+                    kubectl --kubeconfig=$KUBECONFIG create namespace staging --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
+                    kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/stg-deployment.yaml
 
-                    PASS=0
-                    FAIL=0
+                    echo "Waiting for staging deployment to be ready..."
+                    kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-nginx-stg -n staging --timeout=120s
 
-                    # Test 1: HTTP response
-                    CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.20:30081 --connect-timeout 10 || echo "000")
-                    if [ "$CODE" = "200" ]; then
-                        echo "PASS: HTTP 200 response"
-                        PASS=$((PASS+1))
-                    else
-                        echo "WARN: HTTP $CODE response"
-                        FAIL=$((FAIL+1))
-                    fi
+                    echo "Staging pods:"
+                    kubectl --kubeconfig=$KUBECONFIG get pods -n staging -l app=sdos-nginx
 
-                    # Test 2: Response contains nginx content
-                    BODY=$(curl -s http://192.168.121.20:30081 --connect-timeout 10 || echo "")
-                    if echo "$BODY" | grep -qiE "nginx|html|welcome"; then
-                        echo "PASS: Response contains expected content"
-                        PASS=$((PASS+1))
-                    else
-                        echo "WARN: Unexpected response body"
-                        FAIL=$((FAIL+1))
-                    fi
+                    sleep 5
 
-                    # Test 3: Pod count
-                    PODS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n development -l app=sdos-nginx --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-                    echo "Running pods: $PODS"
+                    echo "============================================"
+                    echo " Launching test pod inside Kubernetes..."
+                    echo " Tests run from inside the cluster via DNS"
+                    echo "============================================"
+
+                    kubectl --kubeconfig=$KUBECONFIG run stg-test-pod \
+                        --image=curlimages/curl:latest \
+                        --restart=Never \
+                        --namespace=staging \
+                        --rm \
+                        --attach \
+                        --timeout=60s \
+                        -- sh -c '
+                            echo "=== Test Pod Running Inside Kubernetes ==="
+                            PASS=0
+                            FAIL=0
+
+                            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://sdos-nginx-stg.staging.svc.cluster.local:80 --connect-timeout 10 || echo "000")
+                            if [ "$CODE" = "200" ]; then
+                                echo "PASS: HTTP 200 response"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: HTTP $CODE response"
+                                FAIL=$((FAIL+1))
+                            fi
+
+                            BODY=$(curl -s http://sdos-nginx-stg.staging.svc.cluster.local:80 --connect-timeout 10 || echo "")
+                            if echo "$BODY" | grep -qiE "nginx|html|welcome"; then
+                                echo "PASS: Response contains expected content"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: Unexpected response body"
+                                FAIL=$((FAIL+1))
+                            fi
+
+                            TIME=$(curl -s -o /dev/null -w "%{time_total}" http://sdos-nginx-stg.staging.svc.cluster.local:80 --connect-timeout 10 || echo "999")
+                            echo "Response time: ${TIME}s"
+                            if awk "BEGIN { exit !($TIME < 2.0) }"; then
+                                echo "PASS: Response time under 2s (${TIME}s)"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: Response time too slow (${TIME}s)"
+                                FAIL=$((FAIL+1))
+                            fi
+
+                            echo "============================================"
+                            echo "Staging Tests (from test pod): $PASS passed, $FAIL failed"
+                            echo "============================================"
+
+                            if [ "$FAIL" -gt "0" ]; then
+                                exit 1
+                            fi
+                        ' || true
+
+                    PODS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n staging -l app=sdos-nginx --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+                    echo "Running staging pods: $PODS"
                     if [ "$PODS" -ge "1" ]; then
-                        echo "PASS: At least 1 pod running"
-                        PASS=$((PASS+1))
+                        echo "PASS: Staging pods running"
                     else
-                        echo "FAIL: No pods running"
-                        FAIL=$((FAIL+1))
+                        echo "FAIL: No staging pods running"
+                        exit 1
                     fi
-
-                    echo "============================================"
-                    echo "Integration Tests: $PASS passed, $FAIL failed"
-                    echo "============================================"
                 '''
             }
         }
@@ -223,7 +304,8 @@ EOF
             steps {
                 echo '============================================'
                 echo ' STAGE 4 — LOAD TEST'
-                echo ' Running load test against worker-dev'
+                echo ' Running load test with response time metrics'
+                echo ' Gates production if avg response time > 3s'
                 echo '============================================'
                 sh '''
                     echo "Running load test against http://192.168.121.20:30081"
@@ -231,32 +313,43 @@ EOF
 
                     SUCCESS=0
                     FAIL=0
+                    TOTAL_TIME="0"
 
                     for i in $(seq 1 50); do
                         CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.20:30081 --connect-timeout 5 || echo "000")
+                        TIME=$(curl -s -o /dev/null -w "%{time_total}" http://192.168.121.20:30081 --connect-timeout 5 || echo "0")
                         if [ "$CODE" = "200" ]; then
                             SUCCESS=$((SUCCESS+1))
                         else
                             FAIL=$((FAIL+1))
                         fi
+                        TOTAL_TIME=$(echo "$TOTAL_TIME + $TIME" | bc)
                     done
 
                     TOTAL=$((SUCCESS+FAIL))
                     RATE=$(echo "scale=1; $SUCCESS * 100 / $TOTAL" | bc)
+                    AVG_TIME=$(echo "scale=3; $TOTAL_TIME / $TOTAL" | bc)
 
                     echo "============================================"
                     echo "Load Test Results:"
-                    echo "  Total requests:  $TOTAL"
-                    echo "  Successful:      $SUCCESS"
-                    echo "  Failed:          $FAIL"
-                    echo "  Success rate:    $RATE%"
+                    echo "  Total requests:    $TOTAL"
+                    echo "  Successful:        $SUCCESS"
+                    echo "  Failed:            $FAIL"
+                    echo "  Success rate:      $RATE%"
+                    echo "  Avg response time: ${AVG_TIME}s"
                     echo "============================================"
 
                     if [ "$SUCCESS" -lt "40" ]; then
-                        echo "FAIL: Success rate too low"
+                        echo "FAIL: Success rate too low — blocking production deploy"
                         exit 1
                     fi
-                    echo "PASS: Load test passed"
+
+                    if awk "BEGIN { exit !($AVG_TIME > 3.0) }"; then
+                        echo "FAIL: Avg response time too high (${AVG_TIME}s) — blocking production deploy"
+                        exit 1
+                    fi
+
+                    echo "PASS: Load test passed — avg response time ${AVG_TIME}s"
                 '''
             }
         }
@@ -266,74 +359,82 @@ EOF
                 echo '============================================'
                 echo ' STAGE 5 — PRODUCTION'
                 echo ' Deploying nginx to worker-production'
+                echo ' Running test pod inside Kubernetes cluster'
                 echo '============================================'
                 sh '''
-                    # Ensure namespace exists
                     kubectl --kubeconfig=$KUBECONFIG create namespace production --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
-
-                    # Deploy to production
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/prod-deployment.yaml
 
-                    # Wait for rollout
                     echo "Waiting for production deployment to be ready..."
                     kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-nginx-prod -n production --timeout=120s
 
-                    # Show pods
                     echo "Production pods:"
                     kubectl --kubeconfig=$KUBECONFIG get pods -n production -l app=sdos-nginx
 
-                    # Wait for service to be ready
                     sleep 5
 
                     echo "============================================"
-                    echo " Running production integration tests..."
+                    echo " Launching test pod inside Kubernetes..."
+                    echo " Tests run from inside the cluster via DNS"
                     echo "============================================"
 
-                    PASS=0
-                    FAIL=0
+                    kubectl --kubeconfig=$KUBECONFIG run prod-test-pod \
+                        --image=curlimages/curl:latest \
+                        --restart=Never \
+                        --namespace=production \
+                        --rm \
+                        --attach \
+                        --timeout=60s \
+                        -- sh -c '
+                            echo "=== Test Pod Running Inside Kubernetes ==="
+                            PASS=0
+                            FAIL=0
 
-                    # Test 1: HTTP response
-                    CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.30:30082 --connect-timeout 10 || echo "000")
-                    if [ "$CODE" = "200" ]; then
-                        echo "PASS: HTTP 200 response"
-                        PASS=$((PASS+1))
-                    else
-                        echo "FAIL: HTTP $CODE response"
-                        FAIL=$((FAIL+1))
-                    fi
+                            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://sdos-nginx-prod.production.svc.cluster.local:80 --connect-timeout 10 || echo "000")
+                            if [ "$CODE" = "200" ]; then
+                                echo "PASS: HTTP 200 response"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: HTTP $CODE response"
+                                FAIL=$((FAIL+1))
+                            fi
 
-                    # Test 2: Response contains expected content
-                    BODY=$(curl -s http://192.168.121.30:30082 --connect-timeout 10 || echo "")
-                    if echo "$BODY" | grep -qiE "nginx|html|welcome"; then
-                        echo "PASS: Response contains expected content"
-                        PASS=$((PASS+1))
-                    else
-                        echo "FAIL: Unexpected response body"
-                        FAIL=$((FAIL+1))
-                    fi
+                            BODY=$(curl -s http://sdos-nginx-prod.production.svc.cluster.local:80 --connect-timeout 10 || echo "")
+                            if echo "$BODY" | grep -qiE "nginx|html|welcome"; then
+                                echo "PASS: Response contains expected content"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: Unexpected response body"
+                                FAIL=$((FAIL+1))
+                            fi
 
-                    # Test 3: Pod count
-                    PODS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n production -l app=sdos-nginx --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-                    echo "Running pods: $PODS"
-                    if [ "$PODS" -ge "1" ]; then
-                        echo "PASS: At least 1 pod running"
-                        PASS=$((PASS+1))
-                    else
-                        echo "FAIL: No pods running"
-                        FAIL=$((FAIL+1))
-                    fi
+                            TIME=$(curl -s -o /dev/null -w "%{time_total}" http://sdos-nginx-prod.production.svc.cluster.local:80 --connect-timeout 10 || echo "999")
+                            echo "Response time: ${TIME}s"
+                            if awk "BEGIN { exit !($TIME < 2.0) }"; then
+                                echo "PASS: Response time under 2s (${TIME}s)"
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: Response time too slow (${TIME}s)"
+                                FAIL=$((FAIL+1))
+                            fi
 
+                            echo "============================================"
+                            echo "Production Tests (from test pod): $PASS passed, $FAIL failed"
+                            echo "============================================"
+
+                            if [ "$FAIL" -gt "0" ]; then
+                                echo "WARNING: $FAIL production test(s) failed"
+                            else
+                                echo "DEPLOYMENT COMPLETE — all production tests passed!"
+                            fi
+                        ' || true
+
+                    echo ""
                     echo "============================================"
-                    echo "Production Tests: $PASS passed, $FAIL failed"
                     echo "  Dev:        http://192.168.121.20:30081"
+                    echo "  Staging:    http://192.168.121.20:30083"
                     echo "  Production: http://192.168.121.30:30082"
                     echo "============================================"
-
-                    if [ "$FAIL" -gt "0" ]; then
-                        echo "WARNING: $FAIL production test(s) failed"
-                    else
-                        echo "DEPLOYMENT COMPLETE — all production tests passed!"
-                    fi
                 '''
             }
         }
@@ -341,13 +442,16 @@ EOF
 
     post {
         success {
-            echo 'nginx deployed successfully to dev and production!'
+            echo 'nginx deployed successfully to staging and production!'
         }
         failure {
             sh '''
                 echo "Pipeline failed - cleaning up..."
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-nginx-dev  -n development --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-nginx-prod -n production  --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-nginx-dev -n development --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-nginx-stg -n staging     --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-nginx-prod -n production --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete pod stg-test-pod  -n staging     --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete pod prod-test-pod -n production  --ignore-not-found=true || true
             '''
         }
         always {
