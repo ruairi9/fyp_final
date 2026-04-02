@@ -1,0 +1,202 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
+        VAGRANT_DIR = '/home/ruairi/fyp-cluster'
+        JENKINS_URL = 'http://192.168.121.40:32080'
+        REGISTRY    = 'http://192.168.121.50:30500'
+    }
+
+    stages {
+
+        stage('VMs') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 1 — VM HEALTH'
+                echo ' Checking all 5 VMs are reachable'
+                echo '============================================'
+                sh '''
+                    PASS=0
+                    FAIL=0
+                    cd $VAGRANT_DIR
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        STATUS=$(vagrant ssh $VM -c "echo OK" 2>/dev/null | grep -c OK || echo 0)
+                        if [ "$STATUS" -ge "1" ]; then
+                            echo "PASS: $VM is reachable"
+                            PASS=$((PASS+1))
+                        else
+                            echo "FAIL: $VM is UNREACHABLE"
+                            FAIL=$((FAIL+1))
+                        fi
+                    done
+
+                    echo "============================================"
+                    echo "VM Health: $PASS/5 reachable"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "FAIL: $FAIL VM(s) unreachable"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Pods') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 2 — POD HEALTH'
+                echo ' Checking all pods are Running'
+                echo '============================================'
+                sh '''
+                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | wc -l)
+                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -c Running || echo 0)
+                    FAILED=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -cE "Error|CrashLoop|OOMKilled|Evicted" || echo 0)
+                    PENDING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -c Pending || echo 0)
+
+                    echo "Total pods:   $TOTAL"
+                    echo "Running:      $RUNNING"
+                    echo "Pending:      $PENDING"
+                    echo "Failed:       $FAILED"
+
+                    echo ""
+                    echo "=== Pod List ==="
+                    kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers
+
+                    echo "============================================"
+                    if [ "$FAILED" -gt "0" ]; then
+                        echo "FAIL: $FAILED pod(s) in error state"
+                        exit 1
+                    fi
+                    echo "PASS: All $RUNNING pods running"
+                    echo "============================================"
+                '''
+            }
+        }
+
+        stage('Nodes') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 3 — NODE HEALTH'
+                echo ' Checking all K3s nodes are Ready'
+                echo '============================================'
+                sh '''
+                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers | wc -l)
+                    READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers | grep -c " Ready" || echo 0)
+                    NOT_READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers | grep -c "NotReady" || echo 0)
+
+                    echo "Total nodes:  $TOTAL"
+                    echo "Ready:        $READY"
+                    echo "Not Ready:    $NOT_READY"
+                    echo ""
+                    kubectl --kubeconfig=$KUBECONFIG get nodes
+
+                    echo "============================================"
+                    if [ "$NOT_READY" -gt "0" ]; then
+                        echo "FAIL: $NOT_READY node(s) not ready"
+                        exit 1
+                    fi
+                    echo "PASS: All $READY nodes ready"
+                    echo "============================================"
+                '''
+            }
+        }
+
+        stage('Services') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 4 — SERVICE HEALTH'
+                echo ' Checking Jenkins and Registry are up'
+                echo '============================================'
+                sh '''
+                    PASS=0
+                    FAIL=0
+
+                    # Check Jenkins
+                    JENKINS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $JENKINS_URL --connect-timeout 5 || echo "000")
+                    if [ "$JENKINS_CODE" = "200" ] || [ "$JENKINS_CODE" = "403" ]; then
+                        echo "PASS: Jenkins is up (HTTP $JENKINS_CODE)"
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Jenkins returned HTTP $JENKINS_CODE"
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Check Registry
+                    REGISTRY_CODE=$(curl -s -o /dev/null -w "%{http_code}" $REGISTRY/v2/ --connect-timeout 5 || echo "000")
+                    if [ "$REGISTRY_CODE" = "200" ] || [ "$REGISTRY_CODE" = "401" ]; then
+                        echo "PASS: Registry is up (HTTP $REGISTRY_CODE)"
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Registry returned HTTP $REGISTRY_CODE"
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Check Grafana
+                    GRAFANA_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.50:32030 --connect-timeout 5 || echo "000")
+                    if [ "$GRAFANA_CODE" = "200" ] || [ "$GRAFANA_CODE" = "302" ]; then
+                        echo "PASS: Grafana is up (HTTP $GRAFANA_CODE)"
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: Grafana returned HTTP $GRAFANA_CODE"
+                    fi
+
+                    echo "============================================"
+                    echo "Service Health: $PASS passed, $FAIL failed"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "FAIL: $FAIL critical service(s) down"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Resources') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 5 — RESOURCE HEALTH'
+                echo ' Checking disk space on all VMs'
+                echo '============================================'
+                sh '''
+                    cd $VAGRANT_DIR
+                    FAIL=0
+
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        DISK=$(vagrant ssh $VM -c "df / | tail -1 | awk '{print \$5}' | tr -d '%'" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                        if [ -n "$DISK" ] && [ "$DISK" -gt "90" ] 2>/dev/null; then
+                            echo "WARN: $VM disk at ${DISK}% — getting full"
+                            FAIL=$((FAIL+1))
+                        else
+                            echo "PASS: $VM disk at ${DISK}%"
+                        fi
+                    done
+
+                    # Check host disk
+                    HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
+                    if [ "$HOST_DISK" -gt "95" ]; then
+                        echo "WARN: Host disk at ${HOST_DISK}% — critically full"
+                    else
+                        echo "PASS: Host disk at ${HOST_DISK}%"
+                    fi
+
+                    echo "============================================"
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "WARNING: $FAIL VM(s) have high disk usage"
+                    else
+                        echo "PASS: All resource checks passed"
+                    fi
+                    echo "============================================"
+                '''
+            }
+        }
+    }
+
+    post {
+        success { echo 'HEALTH CHECK PASSED — cluster is healthy' }
+        failure { echo 'HEALTH CHECK FAILED — check the logs above' }
+    }
+}
