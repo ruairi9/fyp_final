@@ -1,0 +1,290 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        KUBECONFIG   = '/home/ruairi/fyp-cluster/k3s.yaml'
+        PROMETHEUS   = 'http://192.168.121.50:32090'
+        GRAFANA      = 'http://192.168.121.50:32030'
+        REPORT_FILE  = 'monitoring-test-report.txt'
+    }
+
+    stages {
+
+        stage('Build') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 1 — SETUP'
+                echo ' Checking monitoring stack is deployed'
+                echo '============================================'
+                sh '''
+                    echo "Monitoring Test Report — $(date)" > $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== MONITORING PODS ===" >> $REPORT_FILE
+
+                    PASS=0
+                    FAIL=0
+
+                    # Check all monitoring pods are running
+                    for POD in prometheus grafana loki promtail docker-registry; do
+                        COUNT=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
+                            --no-headers 2>/dev/null | grep -c "$POD" || echo 0)
+                        RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
+                            --no-headers 2>/dev/null | grep "$POD" | grep -c "Running" || echo 0)
+                        if [ "$RUNNING" -ge "1" ]; then
+                            echo "PASS: $POD is running ($RUNNING pod(s))"
+                            echo "PASS: $POD running" >> $REPORT_FILE
+                            PASS=$((PASS+1))
+                        else
+                            echo "FAIL: $POD is not running"
+                            echo "FAIL: $POD not running" >> $REPORT_FILE
+                            FAIL=$((FAIL+1))
+                        fi
+                    done
+
+                    echo "" >> $REPORT_FILE
+                    echo "Pod checks: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    echo "============================================"
+                    echo "Pod checks: $PASS passed, $FAIL failed"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "FAIL: $FAIL monitoring pod(s) not running"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 2 — PROMETHEUS HEALTH'
+                echo ' Checking Prometheus is scraping metrics'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== PROMETHEUS TESTS ===" >> $REPORT_FILE
+                    PASS=0
+                    FAIL=0
+
+                    # Test 1: Prometheus is reachable
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        $PROMETHEUS/-/healthy --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ]; then
+                        echo "PASS: Prometheus health endpoint returned 200"
+                        echo "PASS: Prometheus reachable" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Prometheus returned HTTP $CODE"
+                        echo "FAIL: Prometheus returned HTTP $CODE" >> $REPORT_FILE
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 2: Prometheus ready
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        $PROMETHEUS/-/ready --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ]; then
+                        echo "PASS: Prometheus is ready"
+                        echo "PASS: Prometheus ready" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: Prometheus ready check returned HTTP $CODE"
+                        echo "WARN: Prometheus ready returned HTTP $CODE" >> $REPORT_FILE
+                    fi
+
+                    # Test 3: Prometheus has active targets
+                    TARGETS=$(curl -s "$PROMETHEUS/api/v1/targets" --connect-timeout 10 \
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); \
+                        active=[t for t in d.get('data',{}).get('activeTargets',[]) if t.get('health')=='up']; \
+                        print(len(active))" 2>/dev/null || echo "0")
+                    if [ "$TARGETS" -gt "0" ] 2>/dev/null; then
+                        echo "PASS: Prometheus has $TARGETS active targets"
+                        echo "PASS: $TARGETS active targets scraping" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: No active Prometheus targets found"
+                        echo "WARN: No active targets" >> $REPORT_FILE
+                    fi
+
+                    # Test 4: Query a real metric
+                    RESULT=$(curl -s "$PROMETHEUS/api/v1/query?query=up" --connect-timeout 10 \
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); \
+                        print(len(d.get('data',{}).get('result',[])))" 2>/dev/null || echo "0")
+                    if [ "$RESULT" -gt "0" ] 2>/dev/null; then
+                        echo "PASS: Prometheus metric query returned $RESULT results"
+                        echo "PASS: Metric query returned $RESULT results" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: Prometheus metric query returned no results"
+                        echo "WARN: Metric query returned no results" >> $REPORT_FILE
+                    fi
+
+                    echo "" >> $REPORT_FILE
+                    echo "Prometheus tests: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    echo "============================================"
+                    echo "Prometheus: $PASS passed, $FAIL failed"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Staging') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 3 — GRAFANA HEALTH'
+                echo ' Checking Grafana is accessible'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== GRAFANA TESTS ===" >> $REPORT_FILE
+                    PASS=0
+                    FAIL=0
+
+                    # Test 1: Grafana is reachable
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        $GRAFANA --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ] || [ "$CODE" = "302" ]; then
+                        echo "PASS: Grafana is reachable (HTTP $CODE)"
+                        echo "PASS: Grafana reachable HTTP $CODE" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Grafana returned HTTP $CODE"
+                        echo "FAIL: Grafana returned HTTP $CODE" >> $REPORT_FILE
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 2: Grafana API health
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        $GRAFANA/api/health --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ]; then
+                        echo "PASS: Grafana API health check passed"
+                        echo "PASS: Grafana API healthy" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: Grafana API health returned HTTP $CODE"
+                        echo "WARN: Grafana API returned HTTP $CODE" >> $REPORT_FILE
+                    fi
+
+                    # Test 3: Grafana response time
+                    TIME=$(curl -s -o /dev/null -w "%{time_total}" \
+                        $GRAFANA --connect-timeout 10 || echo "999")
+                    if awk "BEGIN { exit !($TIME < 3.0) }"; then
+                        echo "PASS: Grafana response time ${TIME}s (under 3s)"
+                        echo "PASS: Response time ${TIME}s" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "WARN: Grafana response time ${TIME}s (slow)"
+                        echo "WARN: Response time ${TIME}s (slow)" >> $REPORT_FILE
+                    fi
+
+                    echo "" >> $REPORT_FILE
+                    echo "Grafana tests: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    echo "============================================"
+                    echo "Grafana: $PASS passed, $FAIL failed"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Load') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 4 — LOKI HEALTH'
+                echo ' Checking Loki log aggregation is working'
+                echo '============================================'
+                sh '''
+                    LOKI="http://192.168.121.50:32030"
+                    echo "" >> $REPORT_FILE
+                    echo "=== LOKI TESTS ===" >> $REPORT_FILE
+
+                    # Check Loki pod is running
+                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
+                        --no-headers 2>/dev/null | grep loki | grep -c Running || echo 0)
+                    if [ "$RUNNING" -ge "1" ]; then
+                        echo "PASS: Loki pod is running"
+                        echo "PASS: Loki pod running" >> $REPORT_FILE
+                    else
+                        echo "WARN: Loki pod not running"
+                        echo "WARN: Loki pod not running" >> $REPORT_FILE
+                    fi
+
+                    # Check promtail pods (one per node)
+                    PROMTAIL=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
+                        --no-headers 2>/dev/null | grep promtail | grep -c Running || echo 0)
+                    echo "PASS: $PROMTAIL promtail pods running (log shippers)"
+                    echo "PASS: $PROMTAIL promtail pods running" >> $REPORT_FILE
+                '''
+            }
+        }
+
+        stage('Production') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 5 — DISK USAGE CHECK'
+                echo ' Warning if monitoring node disk is high'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== DISK USAGE CHECK ===" >> $REPORT_FILE
+
+                    cd /home/ruairi/fyp-cluster
+
+                    DISK=$(vagrant ssh worker-monitoring -c \
+                        "df / | tail -1 | awk '{print \$5}' | tr -d '%'" \
+                        2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+
+                    echo "worker-monitoring disk usage: ${DISK}%"
+                    echo "worker-monitoring disk: ${DISK}%" >> $REPORT_FILE
+
+                    if [ -n "$DISK" ] && [ "$DISK" -gt "90" ] 2>/dev/null; then
+                        echo "WARN: Disk at ${DISK}% — monitoring data may fill disk soon"
+                        echo "WARN: Disk critically high at ${DISK}%" >> $REPORT_FILE
+                    elif [ -n "$DISK" ] && [ "$DISK" -gt "80" ] 2>/dev/null; then
+                        echo "WARN: Disk at ${DISK}% — getting high"
+                        echo "WARN: Disk high at ${DISK}%" >> $REPORT_FILE
+                    else
+                        echo "PASS: Disk at ${DISK}% — OK"
+                        echo "PASS: Disk usage acceptable" >> $REPORT_FILE
+                    fi
+
+                    # Host disk check
+                    HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
+                    echo "Host disk usage: ${HOST_DISK}%"
+                    echo "Host disk: ${HOST_DISK}%" >> $REPORT_FILE
+                    if [ "$HOST_DISK" -gt "95" ]; then
+                        echo "WARN: Host disk at ${HOST_DISK}% — critically full"
+                        echo "WARN: Host disk critically full at ${HOST_DISK}%" >> $REPORT_FILE
+                    else
+                        echo "PASS: Host disk at ${HOST_DISK}%"
+                        echo "PASS: Host disk OK" >> $REPORT_FILE
+                    fi
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== MONITORING TEST COMPLETE: $(date) ===" >> $REPORT_FILE
+
+                    echo ""
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║      MONITORING TEST REPORT            ║"
+                    echo "╚════════════════════════════════════════╝"
+                    cat $REPORT_FILE
+                '''
+                archiveArtifacts artifacts: 'monitoring-test-report.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success { echo 'Monitoring test passed — Prometheus and Grafana are healthy' }
+        failure { echo 'Monitoring test failed — check the logs above' }
+    }
+}

@@ -1,0 +1,263 @@
+pipeline {
+    agent { label 'host-agent' }
+
+    environment {
+        KUBECONFIG   = '/home/ruairi/fyp-cluster/k3s.yaml'
+        REGISTRY     = '192.168.121.50:30500'
+        REGISTRY_URL = 'http://192.168.121.50:30500'
+        REG_USER     = 'admin'
+        REG_PASS     = 'passadmin'
+        TEST_IMAGE   = 'registry-test'
+        TEST_TAG     = 'latest'
+        REPORT_FILE  = 'registry-test-report.txt'
+    }
+
+    stages {
+
+        stage('Build') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 1 — REGISTRY CONNECTIVITY'
+                echo ' Checking registry is reachable'
+                echo '============================================'
+                sh '''
+                    echo "Registry Test Report — $(date)" > $REPORT_FILE
+                    echo "Registry: $REGISTRY" >> $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== CONNECTIVITY ===" >> $REPORT_FILE
+                    PASS=0
+                    FAIL=0
+
+                    # Test 1: Registry pod is running
+                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
+                        --no-headers 2>/dev/null | grep docker-registry | grep -c Running || echo 0)
+                    if [ "$RUNNING" -ge "1" ]; then
+                        echo "PASS: Registry pod is running"
+                        echo "PASS: Registry pod running" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Registry pod is not running"
+                        echo "FAIL: Registry pod not running" >> $REPORT_FILE
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 2: Registry HTTP endpoint
+                    CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        $REGISTRY_URL/v2/ --connect-timeout 10 || echo "000")
+                    if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
+                        echo "PASS: Registry endpoint reachable (HTTP $CODE)"
+                        echo "PASS: Registry reachable HTTP $CODE" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Registry returned HTTP $CODE"
+                        echo "FAIL: Registry returned HTTP $CODE" >> $REPORT_FILE
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    # Test 3: Authentication works
+                    AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                        -u $REG_USER:$REG_PASS \
+                        $REGISTRY_URL/v2/ --connect-timeout 10 || echo "000")
+                    if [ "$AUTH_CODE" = "200" ]; then
+                        echo "PASS: Registry authentication works"
+                        echo "PASS: Authentication successful" >> $REPORT_FILE
+                        PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Registry authentication failed (HTTP $AUTH_CODE)"
+                        echo "FAIL: Authentication failed HTTP $AUTH_CODE" >> $REPORT_FILE
+                        FAIL=$((FAIL+1))
+                    fi
+
+                    echo "" >> $REPORT_FILE
+                    echo "Connectivity: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    echo "============================================"
+                    echo "Connectivity: $PASS passed, $FAIL failed"
+                    echo "============================================"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 2 — PUSH TEST'
+                echo ' Build and push a test image to registry'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== PUSH TEST ===" >> $REPORT_FILE
+
+                    # Create a minimal test Dockerfile
+                    mkdir -p /tmp/registry-test
+                    cat > /tmp/registry-test/Dockerfile <<EOF
+FROM alpine:latest
+LABEL test="registry-test"
+RUN echo "Registry push/pull test image" > /test.txt
+CMD ["cat", "/test.txt"]
+EOF
+
+                    # Check disk before build
+                    DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
+                    echo "Host disk before build: ${DISK}%"
+                    echo "Host disk before build: ${DISK}%" >> $REPORT_FILE
+
+                    if [ "$DISK" -gt "97" ]; then
+                        echo "WARN: Host disk at ${DISK}% — skipping build to protect disk"
+                        echo "WARN: Skipped build — disk too full" >> $REPORT_FILE
+                        exit 0
+                    fi
+
+                    # Login and push
+                    docker login $REGISTRY -u $REG_USER -p $REG_PASS 2>/dev/null
+                    docker build -t $REGISTRY/$TEST_IMAGE:$TEST_TAG /tmp/registry-test/ 2>/dev/null
+                    docker push $REGISTRY/$TEST_IMAGE:$TEST_TAG
+
+                    if [ $? -eq 0 ]; then
+                        echo "PASS: Image pushed successfully to $REGISTRY/$TEST_IMAGE:$TEST_TAG"
+                        echo "PASS: Push successful" >> $REPORT_FILE
+                    else
+                        echo "FAIL: Push failed"
+                        echo "FAIL: Push failed" >> $REPORT_FILE
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Staging') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 3 — PULL TEST'
+                echo ' Pull the test image back from registry'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== PULL TEST ===" >> $REPORT_FILE
+
+                    # Remove local copy first
+                    docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true
+
+                    # Pull from registry
+                    docker pull $REGISTRY/$TEST_IMAGE:$TEST_TAG
+
+                    if [ $? -eq 0 ]; then
+                        echo "PASS: Image pulled successfully from registry"
+                        echo "PASS: Pull successful" >> $REPORT_FILE
+                    else
+                        echo "FAIL: Pull failed"
+                        echo "FAIL: Pull failed" >> $REPORT_FILE
+                        exit 1
+                    fi
+
+                    # Verify image runs
+                    OUTPUT=$(docker run --rm $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null)
+                    if echo "$OUTPUT" | grep -q "Registry push/pull test image"; then
+                        echo "PASS: Image runs correctly — output verified"
+                        echo "PASS: Image runs and output verified" >> $REPORT_FILE
+                    else
+                        echo "WARN: Image ran but output unexpected"
+                        echo "WARN: Unexpected output" >> $REPORT_FILE
+                    fi
+                '''
+            }
+        }
+
+        stage('Load') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 4 — CATALOG CHECK'
+                echo ' List all images in registry'
+                echo '============================================'
+                sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== REGISTRY CATALOG ===" >> $REPORT_FILE
+
+                    IMAGES=$(curl -s -u $REG_USER:$REG_PASS \
+                        $REGISTRY_URL/v2/_catalog --connect-timeout 10 \
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); \
+                        repos=d.get('repositories',[]); \
+                        [print(r) for r in repos]" 2>/dev/null || echo "none")
+
+                    echo "Images in registry:"
+                    echo "$IMAGES"
+                    echo "Images in registry:" >> $REPORT_FILE
+                    echo "$IMAGES" >> $REPORT_FILE
+
+                    COUNT=$(curl -s -u $REG_USER:$REG_PASS \
+                        $REGISTRY_URL/v2/_catalog --connect-timeout 10 \
+                        | python3 -c "import sys,json; d=json.load(sys.stdin); \
+                        print(len(d.get('repositories',[])))" 2>/dev/null || echo "0")
+
+                    echo "Total images: $COUNT"
+                    echo "Total images: $COUNT" >> $REPORT_FILE
+                '''
+            }
+        }
+
+        stage('Production') {
+            steps {
+                echo '============================================'
+                echo ' STAGE 5 — CLEANUP AND DISK CHECK'
+                echo ' Remove test image and check disk usage'
+                echo '============================================'
+                sh '''
+                    # Clean up test image locally
+                    docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true
+                    rm -rf /tmp/registry-test
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== DISK USAGE AFTER TEST ===" >> $REPORT_FILE
+
+                    # Check disk on all VMs
+                    cd /home/ruairi/fyp-cluster
+                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
+                        DISK=$(vagrant ssh $VM -c \
+                            "df / | tail -1 | awk '{print \$5}' | tr -d '%'" \
+                            2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                        if [ -n "$DISK" ]; then
+                            if [ "$DISK" -gt "90" ] 2>/dev/null; then
+                                echo "WARN: $VM disk at ${DISK}% — getting full"
+                                echo "WARN: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
+                            else
+                                echo "PASS: $VM disk at ${DISK}%"
+                                echo "PASS: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
+                            fi
+                        fi
+                    done
+
+                    # Host disk
+                    HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
+                    echo "Host disk: ${HOST_DISK}%"
+                    echo "Host disk: ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
+
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== REGISTRY TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
+
+                    echo ""
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║       REGISTRY TEST REPORT             ║"
+                    echo "╚════════════════════════════════════════╝"
+                    cat $WORKSPACE/$REPORT_FILE
+                '''
+                archiveArtifacts artifacts: 'registry-test-report.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        always {
+            sh '''
+                docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true
+                rm -rf /tmp/registry-test || true
+            '''
+        }
+        success { echo 'Registry test passed — push and pull working correctly' }
+        failure { echo 'Registry test failed — check the logs above' }
+    }
+}
