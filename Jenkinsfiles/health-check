@@ -2,10 +2,11 @@ pipeline {
     agent { label 'host-agent' }
 
     environment {
-        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
-        VAGRANT_DIR = '/home/ruairi/fyp-cluster'
-        JENKINS_URL = 'http://192.168.121.40:32080'
-        REGISTRY    = 'http://192.168.121.50:30500'
+        KUBECONFIG   = '/home/ruairi/fyp-cluster/k3s.yaml'
+        VAGRANT_DIR  = '/home/ruairi/fyp-cluster'
+        JENKINS_URL  = 'http://192.168.121.40:32080'
+        REGISTRY     = 'http://192.168.121.50:30500'
+        REPORT_FILE  = 'health-check-report.txt'
     }
 
     stages {
@@ -17,17 +18,23 @@ pipeline {
                 echo ' Checking all 5 VMs are reachable'
                 echo '============================================'
                 sh '''
+                    echo "Health Check Report — $(date)" > $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
                     PASS=0
                     FAIL=0
                     cd $VAGRANT_DIR
 
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== VM HEALTH ===" >> $WORKSPACE/$REPORT_FILE
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         STATUS=$(vagrant ssh $VM -c "echo OK" 2>/dev/null | grep -c OK || echo 0)
                         if [ "$STATUS" -ge "1" ]; then
                             echo "PASS: $VM is reachable"
+                            echo "PASS: $VM is reachable" >> $WORKSPACE/$REPORT_FILE
                             PASS=$((PASS+1))
                         else
                             echo "FAIL: $VM is UNREACHABLE"
+                            echo "FAIL: $VM is UNREACHABLE" >> $WORKSPACE/$REPORT_FILE
                             FAIL=$((FAIL+1))
                         fi
                     done
@@ -196,6 +203,13 @@ pipeline {
     }
 
     post {
+        always {
+            sh '''
+                echo "" >> $REPORT_FILE
+                echo "=== HEALTH CHECK COMPLETE: $(date) ===" >> $REPORT_FILE
+            '''
+            archiveArtifacts artifacts: 'health-check-report.txt', fingerprint: true
+        }
         success { echo 'HEALTH CHECK PASSED — cluster is healthy' }
         failure { echo 'HEALTH CHECK FAILED — check the logs above' }
     }

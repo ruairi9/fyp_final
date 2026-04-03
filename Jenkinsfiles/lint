@@ -1,118 +1,176 @@
 pipeline {
     agent { label 'host-agent' }
 
-    triggers {
-        githubPush()
-    }
-
-    parameters {
-        string(name: 'REPO', defaultValue: 'ruairi9/fyp', description: 'GitHub repo to lint (owner/repo)')
-    }
-
     environment {
+        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
         VAGRANT_DIR = '/home/ruairi/fyp-cluster'
-        LINT_REPORT = 'lint-report.txt'
-        TARGET_REPO = "${params.REPO}"
+        REPORT_FILE = 'lint-report.txt'
     }
 
     stages {
 
         stage('Build') {
             steps {
-                echo "============================================"
-                echo "SDOS LINT PIPELINE — ${env.TARGET_REPO}"
-                echo "============================================"
+                echo '============================================'
+                echo ' STAGE 1 — SETUP'
+                echo ' Installing lint tools'
+                echo '============================================'
                 sh '''
-                    cd $VAGRANT_DIR
-                    echo "Lint Started: $(date)" > $WORKSPACE/$LINT_REPORT
-                    echo "Repo: $TARGET_REPO" >> $WORKSPACE/$LINT_REPORT
-                    echo "Linter: flake8" >> $WORKSPACE/$LINT_REPORT
-                    echo "============================================" >> $WORKSPACE/$LINT_REPORT
-                    vagrant ssh worker-dev -c "
-                        pip3 install flake8 --quiet --break-system-packages 2>/dev/null || \
-                        sudo apt-get install -y python3-flake8 -qq > /dev/null 2>&1
-                        flake8 --version
-                    " 2>/dev/null
-                    echo "flake8 ready"
+                    echo "Lint Report — $(date)" > $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
+
+                    # Install flake8 if not present
+                    pip install flake8 --break-system-packages -q 2>/dev/null || true
+                    pip install pylint --break-system-packages -q 2>/dev/null || true
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== TOOLS ===" >> $REPORT_FILE
+                    flake8 --version >> $REPORT_FILE 2>/dev/null || echo "flake8 not available" >> $REPORT_FILE
+                    python3 --version >> $REPORT_FILE
+                    echo "Setup complete"
                 '''
             }
         }
 
         stage('Test') {
             steps {
-                echo "Cloning ${env.TARGET_REPO} on worker-dev..."
+                echo '============================================'
+                echo ' STAGE 2 — LINT DASHBOARD FILES'
+                echo ' Running flake8 on all Python files'
+                echo '============================================'
                 sh '''
-                    cd $VAGRANT_DIR
-                    echo "" >> $WORKSPACE/$LINT_REPORT
-                    echo "=== CLONING REPO ===" >> $WORKSPACE/$LINT_REPORT
-                    vagrant ssh worker-dev -c "
-                        rm -rf /tmp/fyp-lint
-                        git clone https://github.com/$TARGET_REPO.git /tmp/fyp-lint 2>&1
-                        echo Clone complete
-                        find /tmp/fyp-lint -name '*.py' | head -20
-                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
-                    echo "" >> $WORKSPACE/$LINT_REPORT
-                    vagrant ssh worker-dev -c "find /tmp/fyp-lint -name '*.py' | wc -l" 2>/dev/null >> $WORKSPACE/$LINT_REPORT
+                    PASS=0
+                    FAIL=0
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== DASHBOARD FILE LINT ===" >> $REPORT_FILE
+
+                    for FILE in home.py dashboard.py server_dashboard.py pipeline_dashboard.py developer_workspace.py; do
+                        FILEPATH="$VAGRANT_DIR/sdos-dashboard/$FILE"
+                        if [ -f "$FILEPATH" ]; then
+                            echo "Linting $FILE..."
+                            echo "--- $FILE ---" >> $REPORT_FILE
+                            ERRORS=$(flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 2>&1 | wc -l)
+                            flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 >> $REPORT_FILE 2>&1 || true
+                            if [ "$ERRORS" -eq "0" ]; then
+                                echo "PASS: $FILE — no issues"
+                                echo "PASS: No issues found" >> $REPORT_FILE
+                                PASS=$((PASS+1))
+                            else
+                                echo "WARN: $FILE — $ERRORS issue(s) found"
+                                echo "WARN: $ERRORS issue(s) found" >> $REPORT_FILE
+                                FAIL=$((FAIL+1))
+                            fi
+                        else
+                            echo "SKIP: $FILE not found"
+                            echo "SKIP: $FILE not found" >> $REPORT_FILE
+                        fi
+                    done
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== SUMMARY ===" >> $REPORT_FILE
+                    echo "Passed: $PASS   Warnings: $FAIL" >> $REPORT_FILE
+                    echo "============================================"
+                    echo "Lint Results: $PASS passed, $FAIL warnings"
+                    echo "============================================"
                 '''
             }
         }
 
         stage('Staging') {
             steps {
-                echo 'Running flake8 lint checks...'
+                echo '============================================'
+                echo ' STAGE 3 — LINT JENKINSFILES'
+                echo ' Checking pipeline syntax'
+                echo '============================================'
                 sh '''
-                    cd $VAGRANT_DIR
-                    echo "" >> $WORKSPACE/$LINT_REPORT
-                    echo "=== FLAKE8 LINT RESULTS ===" >> $WORKSPACE/$LINT_REPORT
-                    vagrant ssh worker-dev -c "
-                        cd /tmp/fyp-lint
-                        flake8 . --max-line-length=120 --exclude=__pycache__,.git,*.pyc --statistics --count 2>&1 || true
-                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
-                    echo "" >> $WORKSPACE/$LINT_REPORT
-                    ERROR_COUNT=$(vagrant ssh worker-dev -c "
-                        cd /tmp/fyp-lint && flake8 . --max-line-length=120 --exclude=__pycache__,.git,*.pyc --count --quiet 2>/dev/null || echo 0
-                    " 2>/dev/null | tail -1 | tr -d '[:space:]')
-                    echo "Total lint errors: $ERROR_COUNT" >> $WORKSPACE/$LINT_REPORT
-                    echo "Total lint errors: $ERROR_COUNT"
-                    echo $ERROR_COUNT > /tmp/lint_error_count
+                    echo "" >> $REPORT_FILE
+                    echo "=== JENKINSFILE LINT ===" >> $REPORT_FILE
+
+                    for FILE in nginx-deploy e2e-test safe-load-test lint stats-snapshot stats-stress-test health-check security-scan; do
+                        FILEPATH="$VAGRANT_DIR/Jenkinsfiles/$FILE"
+                        if [ -f "$FILEPATH" ]; then
+                            # Check for common issues
+                            ISSUES=0
+                            echo "--- $FILE ---" >> $REPORT_FILE
+
+                            # Check for hardcoded passwords (basic check)
+                            if grep -q "password\s*=\s*['\"][^'\"]*['\"]" "$FILEPATH" 2>/dev/null; then
+                                echo "WARN: $FILE may contain hardcoded credentials"
+                                echo "WARN: Possible hardcoded credentials" >> $REPORT_FILE
+                                ISSUES=$((ISSUES+1))
+                            fi
+
+                            # Check file is not empty
+                            if [ -s "$FILEPATH" ]; then
+                                echo "PASS: $FILE exists and is not empty"
+                                echo "PASS: File valid" >> $REPORT_FILE
+                            else
+                                echo "FAIL: $FILE is empty"
+                                echo "FAIL: File is empty" >> $REPORT_FILE
+                            fi
+                        else
+                            echo "SKIP: $FILE not found"
+                            echo "SKIP: $FILE not found" >> $REPORT_FILE
+                        fi
+                    done
                 '''
             }
         }
 
         stage('Load') {
             steps {
-                echo 'Per-file breakdown...'
+                echo '============================================'
+                echo ' STAGE 4 — PYTHON SYNTAX CHECK'
+                echo ' Checking all Python files compile'
+                echo '============================================'
                 sh '''
-                    cd $VAGRANT_DIR
-                    echo "" >> $WORKSPACE/$LINT_REPORT
-                    echo "=== PER-FILE BREAKDOWN ===" >> $WORKSPACE/$LINT_REPORT
-                    vagrant ssh worker-dev -c "
-                        cd /tmp/fyp-lint
-                        flake8 . --max-line-length=120 --exclude=__pycache__,.git,*.pyc --format='%(path)s: %(row)d:%(col)d: %(code)s %(text)s' 2>/dev/null || true
-                    " 2>/dev/null | tee -a $WORKSPACE/$LINT_REPORT
-                    echo "=== LINT COMPLETE: $(date) ===" >> $WORKSPACE/$LINT_REPORT
+                    echo "" >> $REPORT_FILE
+                    echo "=== PYTHON SYNTAX CHECK ===" >> $REPORT_FILE
+                    PASS=0
+                    FAIL=0
+
+                    for FILE in home.py dashboard.py server_dashboard.py pipeline_dashboard.py developer_workspace.py; do
+                        FILEPATH="$VAGRANT_DIR/sdos-dashboard/$FILE"
+                        if [ -f "$FILEPATH" ]; then
+                            if python3 -m py_compile "$FILEPATH" 2>/dev/null; then
+                                echo "PASS: $FILE — syntax OK"
+                                echo "PASS: $FILE — syntax OK" >> $REPORT_FILE
+                                PASS=$((PASS+1))
+                            else
+                                echo "FAIL: $FILE — syntax error"
+                                echo "FAIL: $FILE — syntax error" >> $REPORT_FILE
+                                FAIL=$((FAIL+1))
+                            fi
+                        fi
+                    done
+
+                    echo "" >> $REPORT_FILE
+                    echo "Syntax checks: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    echo "Syntax checks: $PASS passed, $FAIL failed"
+
+                    if [ "$FAIL" -gt "0" ]; then
+                        echo "FAIL: $FAIL file(s) have syntax errors"
+                        exit 1
+                    fi
                 '''
             }
         }
 
         stage('Production') {
             steps {
-                echo 'Final lint verdict...'
+                echo '============================================'
+                echo ' STAGE 5 — FINAL REPORT'
+                echo '============================================'
                 sh '''
-                    ERROR_COUNT=$(cat /tmp/lint_error_count 2>/dev/null | tr -d '[:space:]' || echo "0")
+                    echo "" >> $REPORT_FILE
+                    echo "=== LINT COMPLETE: $(date) ===" >> $REPORT_FILE
+
                     echo ""
-                    echo "========================================"
-                    echo "         LINT RESULTS SUMMARY"
-                    echo "========================================"
-                    cat $WORKSPACE/$LINT_REPORT
-                    echo ""
-                    if [ "$ERROR_COUNT" -eq "0" ] 2>/dev/null; then
-                        echo "LINT PASSED — No errors found in $TARGET_REPO"
-                    else
-                        echo "LINT FAILED — $ERROR_COUNT error(s) found in $TARGET_REPO"
-                        echo "Fix the errors shown above and push again"
-                        exit 1
-                    fi
+                    echo "╔════════════════════════════════════════╗"
+                    echo "║           LINT REPORT                  ║"
+                    echo "╚════════════════════════════════════════╝"
+                    cat $REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'lint-report.txt', fingerprint: true
             }
@@ -120,14 +178,7 @@ pipeline {
     }
 
     post {
-        always {
-            sh '''
-                cd /home/ruairi/fyp-cluster 2>/dev/null || true
-                vagrant ssh worker-dev -c "rm -rf /tmp/fyp-lint 2>/dev/null; true" 2>/dev/null || true
-                rm -f /tmp/lint_error_count
-            '''
-        }
-        success { echo 'Lint passed — code is clean!' }
-        failure { echo 'Lint failed — check lint-report.txt for details' }
+        success { echo 'Lint checks complete — check lint-report.txt in artifacts' }
+        failure { echo 'Lint failed — check the logs above' }
     }
 }

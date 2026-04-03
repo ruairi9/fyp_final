@@ -8,6 +8,7 @@ pipeline {
         BACKEND_IMG   = 'sdos-backend'
         BACKEND_TAG   = 'latest'
         FRONTEND_PORT = '30091'
+        REPORT_FILE   = 'e2e-test-report.txt'
     }
 
     stages {
@@ -19,6 +20,8 @@ pipeline {
                 echo ' Building Flask backend Docker image'
                 echo '============================================'
                 sh '''
+                    echo "E2E Integration Test Report — $(date)" > $REPORT_FILE
+                    echo "============================================" >> $REPORT_FILE
                     mkdir -p /tmp/sdos-e2e/backend
 
                     cat > /tmp/sdos-e2e/backend/app.py <<EOF
@@ -393,12 +396,18 @@ EOF
                     echo "  Frontend: http://192.168.121.20:$FRONTEND_PORT"
                     echo "  Backend:  internal only (cluster DNS)"
                     echo "============================================"
+                    kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null >> $REPORT_FILE || true
+                    echo "" >> $REPORT_FILE
+                    echo "=== TEST COMPLETE: $(date) ===" >> $REPORT_FILE
                 '''
             }
         }
     }
 
     post {
+        always {
+            archiveArtifacts artifacts: 'e2e-test-report.txt', fingerprint: true, allowEmptyArchive: true
+        }
         success {
             echo 'E2E integration tests passed - frontend talks to backend correctly!'
         }
