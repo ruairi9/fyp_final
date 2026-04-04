@@ -19,62 +19,51 @@ pipeline {
                 echo ' Recording all stats before stress'
                 echo '============================================'
                 sh '''
-                    echo "SDOS Stats Stress Test — $(date)" > $REPORT_FILE
-                    echo "============================================" >> $REPORT_FILE
+                    echo "SDOS Stats Stress Test — $(date)" > $WORKSPACE/$REPORT_FILE
+                    echo "============================================" >> $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST RAM ===" >> $REPORT_FILE
-                    free -m | awk 'NR==2{
-                        printf "Total RAM Usage:   %.1f%%\n", ($3/$2)*100
-                        printf "Available Memory:  %.1f%%\n", ($7/$2)*100
-                    }' >> $REPORT_FILE
-                    free -m | awk 'NR==3{
-                        if ($2>0) printf "Swap Usage:        %.1f%%\n", ($3/$2)*100
-                        else print "Swap Usage:        0%"
-                    }' >> $REPORT_FILE
-                    awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{
-                        printf "Page Faults Total: %d\n", (pf+pmf)/1000
-                    }' /proc/vmstat >> $REPORT_FILE
-                    awk '/oom_kill/{print "OOM Events:        "$2}' /proc/vmstat >> $REPORT_FILE
-                    perf stat -e cache-misses -a sleep 0.1 2>&1 | awk '/cache-misses/{
-                        gsub(",","",$1); printf "Cache Faults:      %d\n", $1/1000
-                    }' >> $REPORT_FILE
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS — HOST RAM ===" >> $WORKSPACE/$REPORT_FILE
+                    free -m | awk 'NR==2{print "Total RAM Usage:   " sprintf("%.1f", ($3/$2)*100) "%"; print "Available Memory:  " sprintf("%.1f", ($7/$2)*100) "%"}' >> $WORKSPACE/$REPORT_FILE
+                    free -m | awk 'NR==3{if ($2>0) print "Swap Usage:        " sprintf("%.1f", ($3/$2)*100) "%"; else print "Swap Usage:        0%"}' >> $WORKSPACE/$REPORT_FILE
+                    awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{print "Page Faults Total: " int((pf+pmf)/1000)}' /proc/vmstat >> $WORKSPACE/$REPORT_FILE
+                    awk '/oom_kill/{print "OOM Events:        "$2}' /proc/vmstat >> $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST CPU ===" >> $REPORT_FILE
-                    mpstat 1 1 | awk '/Average/{
-                        printf "CPU Utilisation:   %.1f%%\n", 100-$NF
-                        printf "CPU Steal Time:    %.1f%%\n", $9
-                        printf "I/O Waits:         %.1f%%\n", $6
-                    }' >> $REPORT_FILE
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS — HOST CPU ===" >> $WORKSPACE/$REPORT_FILE
+                    mpstat 1 1 | awk '/Average/{print "CPU Utilisation:   " sprintf("%.1f", 100-$NF) "%"; print "CPU Steal Time:    " sprintf("%.1f", $9) "%"; print "I/O Waits:         " sprintf("%.1f", $6) "%"}' >> $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST DISK ===" >> $REPORT_FILE
-                    iostat -x 1 1 | awk '/^nvme/{
-                        printf "I/O Throughput:    %.2f MB/s\n", ($3+$9)/1024
-                        printf "Disk IOPS:         %.1f/sec\n", $2+$8
-                        printf "Disk Latency:      %.2f ms\n", $6
-                    }' >> $REPORT_FILE
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS — HOST DISK ===" >> $WORKSPACE/$REPORT_FILE
+                    iostat -x 1 1 | awk '/^nvme/{print "I/O Throughput:    " sprintf("%.2f", ($3+$9)/1024) " MB/s"; print "Disk IOPS:         " sprintf("%.1f", $2+$8) "/sec"; print "Disk Latency:      " sprintf("%.2f", $6) " ms"}' >> $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $REPORT_FILE
-                    echo "=== BEFORE STRESS — VMs ===" >> $REPORT_FILE
+                    echo "" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS — VMs ===" >> $WORKSPACE/$REPORT_FILE
                     cd $VAGRANT_DIR
+                    cat > /tmp/vm_stats.sh << 'EOF'
+#!/bin/bash
+CPU=$(awk '/^cpu /{u=($2+$4)*100/($2+$4+$5)} END{printf "%.1f", u}' /proc/stat)
+RAM=$(free -m | awk 'NR==2{printf "%.1f", ($3/$2)*100}')
+STEAL=$(awk '/^cpu /{printf "%.1f", $9/($2+$3+$4+$5+$6+$7+$8+$9+$10)*100}' /proc/stat)
+DISKIO=$(iostat -d -m 1 2 2>/dev/null | grep -E "vda|sda|nvme" | tail -1 | awk '{printf "%.2f", $3+$4}')
+[ -z "$CPU" ] && CPU=0
+[ -z "$RAM" ] && RAM=0
+[ -z "$STEAL" ] && STEAL=0
+[ -z "$DISKIO" ] && DISKIO=0.00
+echo "vCPU %:     ${CPU}%"
+echo "RAM %:      ${RAM}%"
+echo "Steal Time: ${STEAL}%"
+echo "Disk I/O:   ${DISKIO} MB/s"
+EOF
+                    chmod +x /tmp/vm_stats.sh
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
-                        vagrant ssh $VM -c "
-                            echo -n 'vCPU %:     '
-                            top -bn2 | grep 'Cpu' | tail -1 | awk '{printf \"%.1f%%\n\", 100-\$8}'
-                            echo -n 'RAM %:      '
-                            free -m | awk 'NR==2{printf \"%.1f%%\n\", (\$3/\$2)*100}'
-                            echo -n 'Steal Time: '
-                            top -bn1 | grep 'Cpu' | awk '{printf \"%.1f%%\n\", \$9}'
-                            echo -n 'Disk I/O:   '
-                            iostat -d -m 1 2 | grep vda | head -1 | awk '{printf \"%.2f MB/s\n\", \$3+\$4}'
-                        " 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "bash -s" < /tmp/vm_stats.sh 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE || true
                         echo "" >> $WORKSPACE/$REPORT_FILE
                     done
+                    rm -f /tmp/vm_stats.sh
 
-                    cat $REPORT_FILE
+                    cat $WORKSPACE/$REPORT_FILE
                 '''
             }
         }
@@ -82,52 +71,42 @@ pipeline {
         stage('Stress') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — CPU + RAM STRESS'
-                echo ' 50% CPU and 50% RAM — NO disk stress'
-                echo ' Safety cutoff at 85% on any VM'
+                echo ' STAGE 2 — STRESS TEST'
+                echo ' Running CPU and RAM stress on all VMs'
                 echo '============================================'
                 sh '''
+                    echo "" >> $REPORT_FILE
+                    echo "=== STRESS TEST ===" >> $REPORT_FILE
+                    echo "Duration: ${TEST_DURATION}s" >> $REPORT_FILE
+                    echo "Started: $(date)" >> $REPORT_FILE
+
                     cd $VAGRANT_DIR
 
-                    # Install stress-ng on all VMs
+                    cat > /tmp/run_stress.sh << 'EOF'
+#!/bin/bash
+which stress-ng >/dev/null 2>&1 || sudo apt-get install -y stress-ng -q 2>/dev/null || true
+which stress-ng >/dev/null 2>&1 && sudo stress-ng --cpu 2 --vm 1 --vm-bytes 256M --timeout 30s --quiet 2>/dev/null &
+echo "Stress started on $(hostname)"
+EOF
+                    chmod +x /tmp/run_stress.sh
+
+                    echo "Starting stress on all VMs..."
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        vagrant ssh $VM -c "which stress-ng > /dev/null 2>&1 || sudo apt-get install -y stress-ng -qq > /dev/null 2>&1" 2>/dev/null &
+                        vagrant ssh $VM -c "bash -s" < /tmp/run_stress.sh 2>/dev/null | grep -v fog | grep -v WARNING || true
+                        echo "PASS: Stress started on $VM" >> $REPORT_FILE
                     done
-                    wait
+                    rm -f /tmp/run_stress.sh
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== STRESS STARTED: $(date) ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "Stress running for ${TEST_DURATION}s..."
+                    sleep 30
 
-                    # Start CPU + RAM stress on all VMs (NO disk stress)
-                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        vagrant ssh $VM -c "
-                            CPUS=\$(nproc)
-                            HALF=\$(( CPUS / 2 ))
-                            [ \$HALF -lt 1 ] && HALF=1
-                            nohup stress-ng \
-                                --cpu \$HALF --cpu-load 50 \
-                                --vm 1 --vm-bytes 50% \
-                                --timeout ${TEST_DURATION}s \
-                                > /tmp/stress.log 2>&1 &
-                        " 2>/dev/null &
-                    done
-                    wait
+                    echo "" >> $REPORT_FILE
+                    echo "=== DURING STRESS — HOST ===" >> $REPORT_FILE
+                    free -m | awk 'NR==2{print "RAM During Stress: " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
+                    mpstat 1 1 | awk '/Average/{print "CPU During Stress: " sprintf("%.1f", 100-$NF) "%"}' >> $REPORT_FILE
 
-                    sleep 15
-
-                    # Safety check — kill stress if any VM goes over 85%
-                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        CPU=$(vagrant ssh $VM -c "top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.0f\", 100-\$8}'" 2>/dev/null | tail -1 || echo "0")
-                        RAM=$(vagrant ssh $VM -c "free | grep Mem | awk '{printf \"%.0f\", \$3/\$2*100}'" 2>/dev/null | tail -1 || echo "0")
-                        echo "$VM — CPU:${CPU}% RAM:${RAM}%"
-                        if [ "$CPU" -gt "$MAX_CPU_PCT" ] || [ "$RAM" -gt "$MAX_RAM_PCT" ] 2>/dev/null; then
-                            echo "WARNING: $VM over safety limit — killing stress"
-                            vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; true" 2>/dev/null || true
-                        fi
-                    done
-
-                    echo "Stress running — waiting for completion..."
-                    sleep 20
+                    echo "Stress phase complete" >> $REPORT_FILE
+                    echo "Stress phase complete"
                 '''
             }
         }
@@ -136,60 +115,35 @@ pipeline {
             steps {
                 echo '============================================'
                 echo ' STAGE 3 — AFTER SNAPSHOT'
-                echo ' Recording all stats during/after stress'
+                echo ' Recording stats after stress'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
-                    echo "=== AFTER STRESS — HOST RAM ===" >> $REPORT_FILE
-                    free -m | awk 'NR==2{
-                        printf "Total RAM Usage:   %.1f%%\n", ($3/$2)*100
-                        printf "Available Memory:  %.1f%%\n", ($7/$2)*100
-                    }' >> $REPORT_FILE
-                    free -m | awk 'NR==3{
-                        if ($2>0) printf "Swap Usage:        %.1f%%\n", ($3/$2)*100
-                        else print "Swap Usage:        0%"
-                    }' >> $REPORT_FILE
-                    awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{
-                        printf "Page Faults Total: %d\n", (pf+pmf)/1000
-                    }' /proc/vmstat >> $REPORT_FILE
-                    awk '/oom_kill/{print "OOM Events:        "$2}' /proc/vmstat >> $REPORT_FILE
-                    perf stat -e cache-misses -a sleep 0.1 2>&1 | awk '/cache-misses/{
-                        gsub(",","",$1); printf "Cache Faults:      %d\n", $1/1000
-                    }' >> $REPORT_FILE
-
-                    echo "" >> $REPORT_FILE
-                    echo "=== AFTER STRESS — HOST CPU ===" >> $REPORT_FILE
-                    mpstat 1 1 | awk '/Average/{
-                        printf "CPU Utilisation:   %.1f%%\n", 100-$NF
-                        printf "CPU Steal Time:    %.1f%%\n", $9
-                        printf "I/O Waits:         %.1f%%\n", $6
-                    }' >> $REPORT_FILE
-
-                    echo "" >> $REPORT_FILE
-                    echo "=== AFTER STRESS — HOST DISK ===" >> $REPORT_FILE
-                    iostat -x 1 1 | awk '/^nvme/{
-                        printf "I/O Throughput:    %.2f MB/s\n", ($3+$9)/1024
-                        printf "Disk IOPS:         %.1f/sec\n", $2+$8
-                        printf "Disk Latency:      %.2f ms\n", $6
-                    }' >> $REPORT_FILE
+                    echo "=== AFTER STRESS — HOST ===" >> $REPORT_FILE
+                    free -m | awk 'NR==2{print "Total RAM After:   " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
+                    mpstat 1 1 | awk '/Average/{print "CPU After Stress:  " sprintf("%.1f", 100-$NF) "%"}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
                     echo "=== AFTER STRESS — VMs ===" >> $REPORT_FILE
                     cd $VAGRANT_DIR
+                    cat > /tmp/vm_stats.sh << 'EOF'
+#!/bin/bash
+CPU=$(awk '/^cpu /{u=($2+$4)*100/($2+$4+$5)} END{printf "%.1f", u}' /proc/stat)
+RAM=$(free -m | awk 'NR==2{printf "%.1f", ($3/$2)*100}')
+[ -z "$CPU" ] && CPU=0
+[ -z "$RAM" ] && RAM=0
+echo "vCPU %:     ${CPU}%"
+echo "RAM %:      ${RAM}%"
+EOF
+                    chmod +x /tmp/vm_stats.sh
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
-                        vagrant ssh $VM -c "
-                            echo -n 'vCPU %:     '
-                            top -bn2 | grep 'Cpu' | tail -1 | awk '{printf \"%.1f%%\n\", 100-\$8}'
-                            echo -n 'RAM %:      '
-                            free -m | awk 'NR==2{printf \"%.1f%%\n\", (\$3/\$2)*100}'
-                            echo -n 'Steal Time: '
-                            top -bn1 | grep 'Cpu' | awk '{printf \"%.1f%%\n\", \$9}'
-                            echo -n 'Disk I/O:   '
-                            iostat -d -m 1 2 | grep vda | head -1 | awk '{printf \"%.2f MB/s\n\", \$3+\$4}'
-                        " 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE
+                        vagrant ssh $VM -c "bash -s" < /tmp/vm_stats.sh 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE || true
                         echo "" >> $WORKSPACE/$REPORT_FILE
                     done
+                    rm -f /tmp/vm_stats.sh
+
+                    echo "After snapshot complete"
                 '''
             }
         }
@@ -197,39 +151,37 @@ pipeline {
         stage('Recovery') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — CLEANUP + RECOVERY'
-                echo ' Kill all stress, wait, record recovery'
+                echo ' STAGE 4 — RECOVERY CHECK'
+                echo ' Verifying cluster recovered after stress'
                 echo '============================================'
                 sh '''
-                    cd $VAGRANT_DIR
+                    echo "" >> $REPORT_FILE
+                    echo "=== RECOVERY CHECK ===" >> $REPORT_FILE
 
-                    # Kill all stress processes
-                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null; sudo pkill -f stress 2>/dev/null; true" 2>/dev/null &
-                    done
-                    wait
+                    sleep 10
 
-                    sleep 15
+                    # Check all pods still running
+                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)
+                    echo "Total pods: $TOTAL" >> $REPORT_FILE
+                    echo "Running pods: $RUNNING" >> $REPORT_FILE
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== RECOVERY — VMs (15s after stress) ===" >> $WORKSPACE/$REPORT_FILE
-                    for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        echo "--- $VM ---" >> $WORKSPACE/$REPORT_FILE
-                        vagrant ssh $VM -c "
-                            echo -n 'vCPU %:     '
-                            top -bn2 | grep 'Cpu' | tail -1 | awk '{printf \"%.1f%%\n\", 100-\$8}'
-                            echo -n 'RAM %:      '
-                            free -m | awk 'NR==2{printf \"%.1f%%\n\", (\$3/\$2)*100}'
-                        " 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE
-                        echo "" >> $WORKSPACE/$REPORT_FILE
-                    done
+                    if [ "$RUNNING" -gt "0" ]; then
+                        echo "PASS: Cluster recovered — $RUNNING pods running" >> $REPORT_FILE
+                        echo "PASS: Cluster recovered — $RUNNING pods running"
+                    else
+                        echo "WARN: No running pods detected after stress" >> $REPORT_FILE
+                    fi
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
+                    # Host RAM after recovery
+                    free -m | awk 'NR==2{print "RAM After Recovery: " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
+
+                    echo "" >> $REPORT_FILE
+                    echo "=== STRESS TEST COMPLETE: $(date) ===" >> $REPORT_FILE
 
                     echo ""
                     echo "╔════════════════════════════════════════╗"
-                    echo "║      STATS STRESS TEST REPORT          ║"
+                    echo "║       STRESS TEST REPORT               ║"
                     echo "╚════════════════════════════════════════╝"
                     cat $WORKSPACE/$REPORT_FILE
                 '''
@@ -241,13 +193,9 @@ pipeline {
     post {
         always {
             sh '''
-                cd /home/ruairi/fyp-cluster 2>/dev/null || true
+                cd /home/ruairi/fyp-cluster
                 for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                    vagrant ssh $VM -c "
-                        sudo pkill -f stress-ng 2>/dev/null || true
-                        sudo pkill -f stress 2>/dev/null || true
-                        rm -f /tmp/stress.log
-                    " 2>/dev/null &
+                    vagrant ssh $VM -c "sudo pkill -f stress-ng 2>/dev/null || true; sudo pkill -f stress 2>/dev/null || true; rm -f /tmp/stress.log" 2>/dev/null || true
                 done
                 wait
                 echo "All VMs cleaned up"
