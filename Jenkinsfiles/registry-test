@@ -110,8 +110,10 @@ EOF
                     if [ "$DISK" -gt "97" ]; then
                         echo "WARN: Host disk at ${DISK}% — skipping build to protect disk"
                         echo "WARN: Skipped build — disk too full" >> $REPORT_FILE
+                        echo "SKIPPED" > /tmp/registry_test_skipped
                         exit 0
                     fi
+                    rm -f /tmp/registry_test_skipped
 
                     # Login and push
                     docker login $REGISTRY -u $REG_USER -p $REG_PASS 2>/dev/null
@@ -139,6 +141,13 @@ EOF
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== PULL TEST ===" >> $REPORT_FILE
+
+                    # Skip if stage 2 was skipped due to disk
+                    if [ -f /tmp/registry_test_skipped ]; then
+                        echo "SKIP: Pull test skipped — build was skipped due to full disk"
+                        echo "SKIP: Pull test skipped" >> $REPORT_FILE
+                        exit 0
+                    fi
 
                     # Remove local copy first
                     docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true

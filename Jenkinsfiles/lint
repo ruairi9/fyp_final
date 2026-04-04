@@ -1,9 +1,12 @@
 pipeline {
     agent { label 'host-agent' }
 
+    parameters {
+        string(name: 'REPO', defaultValue: '', description: 'GitHub repo to lint e.g. ruairi9/sample1')
+        string(name: 'TOKEN', defaultValue: '', description: 'GitHub token for private repos')
+    }
+
     environment {
-        KUBECONFIG  = '/home/ruairi/fyp-cluster/k3s.yaml'
-        VAGRANT_DIR = '/home/ruairi/fyp-cluster'
         REPORT_FILE = 'lint-report.txt'
     }
 
@@ -17,15 +20,14 @@ pipeline {
                 echo '============================================'
                 sh '''
                     echo "Lint Report — $(date)" > $REPORT_FILE
+                    echo "Repo: ${REPO:-dashboard files}" >> $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
-                    # Install flake8 if not present
-                    pip install flake8 --break-system-packages -q 2>/dev/null || true
-                    pip install pylint --break-system-packages -q 2>/dev/null || true
+                    python3 -m pip install flake8 --break-system-packages -q 2>/dev/null || true
 
                     echo "" >> $REPORT_FILE
                     echo "=== TOOLS ===" >> $REPORT_FILE
-                    flake8 --version >> $REPORT_FILE 2>/dev/null || echo "flake8 not available" >> $REPORT_FILE
+                    python3 -m flake8 --version >> $REPORT_FILE 2>/dev/null || echo "flake8 not available" >> $REPORT_FILE
                     python3 --version >> $REPORT_FILE
                     echo "Setup complete"
                 '''
@@ -35,44 +37,69 @@ pipeline {
         stage('Test') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — LINT DASHBOARD FILES'
-                echo ' Running flake8 on all Python files'
+                echo ' STAGE 2 — LINT PYTHON FILES'
+                echo ' Running flake8'
                 echo '============================================'
                 sh '''
                     PASS=0
                     FAIL=0
 
                     echo "" >> $REPORT_FILE
-                    echo "=== DASHBOARD FILE LINT ===" >> $REPORT_FILE
+                    echo "=== PYTHON FILE LINT ===" >> $REPORT_FILE
 
-                    for FILE in home.py dashboard.py server_dashboard.py pipeline_dashboard.py developer_workspace.py; do
-                        FILEPATH="$VAGRANT_DIR/sdos-dashboard/$FILE"
-                        if [ -f "$FILEPATH" ]; then
-                            echo "Linting $FILE..."
-                            echo "--- $FILE ---" >> $REPORT_FILE
-                            ERRORS=$(flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 2>&1 | wc -l)
-                            flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 >> $REPORT_FILE 2>&1 || true
-                            if [ "$ERRORS" -eq "0" ]; then
-                                echo "PASS: $FILE — no issues"
-                                echo "PASS: No issues found" >> $REPORT_FILE
-                                PASS=$((PASS+1))
-                            else
-                                echo "WARN: $FILE — $ERRORS issue(s) found"
-                                echo "WARN: $ERRORS issue(s) found" >> $REPORT_FILE
-                                FAIL=$((FAIL+1))
-                            fi
+                    # If a repo was passed — clone and lint it
+                    if [ -n "${REPO}" ]; then
+                        echo "Cloning ${REPO}..."
+                        rm -rf /tmp/lint-repo
+                        if [ -n "${TOKEN}" ]; then
+                            git clone https://${TOKEN}@github.com/${REPO}.git /tmp/lint-repo 2>/dev/null || true
                         else
-                            echo "SKIP: $FILE not found"
-                            echo "SKIP: $FILE not found" >> $REPORT_FILE
+                            git clone https://github.com/${REPO}.git /tmp/lint-repo 2>/dev/null || true
+                        fi
+
+                        if [ ! -d "/tmp/lint-repo" ] || [ -z "$(ls -A /tmp/lint-repo 2>/dev/null)" ]; then
+                            echo "FAIL: Could not clone ${REPO}"
+                            echo "FAIL: Could not clone ${REPO}" >> $REPORT_FILE
+                            echo 1 > /tmp/lint_fail_count
+                            exit 0
+                        fi
+
+                        echo "Linting files in ${REPO}..."
+                        LINT_DIR=/tmp/lint-repo
+                    else
+                        echo "No repo specified — linting dashboard files"
+                        LINT_DIR=/home/ruairi/fyp-cluster/sdos-dashboard
+                    fi
+
+                    # Find all Python files and lint them
+                    # Use for loop not while read to keep FAIL counter in same shell
+                    for FILEPATH in $(find $LINT_DIR -name "*.py" -not -path "*/__pycache__/*" -not -path "*/.git/*" | sort); do
+                        FILE=$(basename $FILEPATH)
+                        echo "Linting $FILE..."
+                        echo "--- $FILE ---" >> $REPORT_FILE
+                        OUTPUT=$(python3 -m flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 2>&1 || true)
+                        if [ -z "$OUTPUT" ]; then
+                            echo "PASS: $FILE — no issues"
+                            echo "PASS: No issues found" >> $REPORT_FILE
+                            PASS=$((PASS+1))
+                        else
+                            COUNT=$(echo "$OUTPUT" | wc -l)
+                            echo "$OUTPUT" >> $REPORT_FILE
+                            echo "FAIL: $FILE — $COUNT issue(s) found"
+                            echo "FAIL: $COUNT issue(s) found" >> $REPORT_FILE
+                            FAIL=$((FAIL+1))
                         fi
                     done
 
                     echo "" >> $REPORT_FILE
                     echo "=== SUMMARY ===" >> $REPORT_FILE
-                    echo "Passed: $PASS   Warnings: $FAIL" >> $REPORT_FILE
+                    echo "Passed: $PASS   Failed: $FAIL" >> $REPORT_FILE
                     echo "============================================"
-                    echo "Lint Results: $PASS passed, $FAIL warnings"
+                    echo "Lint Results: $PASS passed, $FAIL failed"
                     echo "============================================"
+
+                    echo $FAIL > /tmp/lint_fail_count
+                    rm -rf /tmp/lint-repo
                 '''
             }
         }
@@ -81,27 +108,20 @@ pipeline {
             steps {
                 echo '============================================'
                 echo ' STAGE 3 — LINT JENKINSFILES'
-                echo ' Checking pipeline syntax'
+                echo ' Checking pipeline files exist'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== JENKINSFILE LINT ===" >> $REPORT_FILE
 
-                    for FILE in nginx-deploy e2e-test safe-load-test lint stats-snapshot stats-stress-test health-check security-scan; do
-                        FILEPATH="$VAGRANT_DIR/Jenkinsfiles/$FILE"
+                    for FILE in nginx-deploy e2e-test safe-load-test lint stats-snapshot stats-stress-test health-check security-scan monitoring-test registry-test; do
+                        FILEPATH="/home/ruairi/fyp-cluster/Jenkinsfiles/$FILE"
                         if [ -f "$FILEPATH" ]; then
-                            # Check for common issues
-                            ISSUES=0
                             echo "--- $FILE ---" >> $REPORT_FILE
-
-                            # Check for hardcoded passwords (basic check)
-                            if grep -q "password\s*=\s*['\"][^'\"]*['\"]" "$FILEPATH" 2>/dev/null; then
+                            if grep -qiE "password|token|secret|api_key|pwd" "$FILEPATH" 2>/dev/null; then
                                 echo "WARN: $FILE may contain hardcoded credentials"
                                 echo "WARN: Possible hardcoded credentials" >> $REPORT_FILE
-                                ISSUES=$((ISSUES+1))
                             fi
-
-                            # Check file is not empty
                             if [ -s "$FILEPATH" ]; then
                                 echo "PASS: $FILE exists and is not empty"
                                 echo "PASS: File valid" >> $REPORT_FILE
@@ -122,7 +142,7 @@ pipeline {
             steps {
                 echo '============================================'
                 echo ' STAGE 4 — PYTHON SYNTAX CHECK'
-                echo ' Checking all Python files compile'
+                echo ' Checking all dashboard files compile'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
@@ -131,7 +151,7 @@ pipeline {
                     FAIL=0
 
                     for FILE in home.py dashboard.py server_dashboard.py pipeline_dashboard.py developer_workspace.py; do
-                        FILEPATH="$VAGRANT_DIR/sdos-dashboard/$FILE"
+                        FILEPATH="/home/ruairi/fyp-cluster/sdos-dashboard/$FILE"
                         if [ -f "$FILEPATH" ]; then
                             if python3 -m py_compile "$FILEPATH" 2>/dev/null; then
                                 echo "PASS: $FILE — syntax OK"
@@ -148,11 +168,7 @@ pipeline {
                     echo "" >> $REPORT_FILE
                     echo "Syntax checks: $PASS passed, $FAIL failed" >> $REPORT_FILE
                     echo "Syntax checks: $PASS passed, $FAIL failed"
-
-                    if [ "$FAIL" -gt "0" ]; then
-                        echo "FAIL: $FAIL file(s) have syntax errors"
-                        exit 1
-                    fi
+                    echo $FAIL > /tmp/syntax_fail_count
                 '''
             }
         }
@@ -171,6 +187,19 @@ pipeline {
                     echo "║           LINT REPORT                  ║"
                     echo "╚════════════════════════════════════════╝"
                     cat $REPORT_FILE
+
+                    LINT_FAILS=$(cat /tmp/lint_fail_count 2>/dev/null | tr -d '[:space:]' || echo 0)
+                    SYNTAX_FAILS=$(cat /tmp/syntax_fail_count 2>/dev/null | tr -d '[:space:]' || echo 0)
+                    [ -z "$LINT_FAILS" ] && LINT_FAILS=0
+                    [ -z "$SYNTAX_FAILS" ] && SYNTAX_FAILS=0
+                    rm -f /tmp/lint_fail_count /tmp/syntax_fail_count
+
+                    if [ "$LINT_FAILS" -gt "0" ] || [ "$SYNTAX_FAILS" -gt "0" ]; then
+                        echo ""
+                        echo "PIPELINE FAILED — fix lint and syntax issues above"
+                        exit 1
+                    fi
+                    echo "PIPELINE PASSED — all checks clean"
                 '''
                 archiveArtifacts artifacts: 'lint-report.txt', fingerprint: true
             }

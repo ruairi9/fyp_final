@@ -20,10 +20,13 @@ pipeline {
                     echo "============================================" >> $REPORT_FILE
 
                     # Install trivy if not present
+                    export PATH=$PATH:/home/ruairi/.local/bin
                     if ! which trivy > /dev/null 2>&1; then
                         echo "Installing Trivy..."
-                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                        mkdir -p /home/ruairi/.local/bin
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /home/ruairi/.local/bin
                     fi
+                    export PATH=$PATH:/home/ruairi/.local/bin
 
                     trivy --version
                     echo "PASS: Trivy ready"
@@ -38,6 +41,7 @@ pipeline {
                 echo ' Scanning Docker images for vulnerabilities'
                 echo '============================================'
                 sh '''
+                    export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
                     echo "=== DOCKER IMAGE SCANS ===" >> $REPORT_FILE
 
@@ -72,6 +76,7 @@ pipeline {
                 echo ' Scanning cluster for misconfigurations'
                 echo '============================================'
                 sh '''
+                    export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
                     echo "=== KUBERNETES CLUSTER SCAN ===" >> $REPORT_FILE
 
@@ -92,6 +97,7 @@ pipeline {
                 echo ' Scanning Dockerfiles and K8s manifests'
                 echo '============================================'
                 sh '''
+                    export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
                     echo "=== CONFIG FILE SCANS ===" >> $REPORT_FILE
 
