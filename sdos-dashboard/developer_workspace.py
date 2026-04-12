@@ -171,6 +171,10 @@ def save_github_file(token, owner, repo, path, content, sha):
     try:
         url = f'https://api.github.com/repos/{owner}/{repo}/contents/{path}'
         content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        # Ensure content ends with newline (fixes W292 lint error)
+        if not content.endswith('\n'):
+            content = content + '\n'
+        content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
         payload = {
             'message': f'Update {path} via SDOS Workspace',
             'content': content_b64,
@@ -257,30 +261,30 @@ WORKSPACE_TEMPLATE = '''
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: 'Segoe UI', Arial, sans-serif; 
-            background: #0f172a; 
-            color: #e2e8f0; 
+            background: #1a1a1a; 
+            color: #e0e0e0; 
         }
         
         .header {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            background: #3a3a3a;
             padding: 20px 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+            border-bottom: 4px solid #cc0000;
         }
         
         .header h1 { font-size: 32px; color: white; }
         .header-left { display: flex; align-items: center; gap: 20px; }
         
         .btn { 
-            background: #3b82f6; color: white; border: none; 
+            background: #555555; color: white; border: none; 
             padding: 10px 20px; border-radius: 8px; cursor: pointer; 
             text-decoration: none; display: inline-block; transition: all 0.3s; 
         }
-        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn:hover { background: #666666; transform: translateY(-1px); }
         .btn-home { background: #64748b; }
-        .btn-home:hover { background: #475569; }
+        .btn-home:hover { background: #555555; }
         .btn-success { background: #22c55e; }
         .btn-success:hover { background: #16a34a; }
         .btn-danger { background: #ef4444; }
@@ -288,8 +292,8 @@ WORKSPACE_TEMPLATE = '''
         .btn-warning { background: #f59e0b; }
         .btn-warning:hover { background: #d97706; }
         .btn-small { padding: 6px 12px; font-size: 12px; }
-        .btn-secondary { background: #475569; }
-        .btn-secondary:hover { background: #334155; }
+        .btn-secondary { background: #555555; }
+        .btn-secondary:hover { background: #4a4a4a; }
         
         .modal {
             display: none;
@@ -304,8 +308,8 @@ WORKSPACE_TEMPLATE = '''
         .modal.active { display: flex; }
         
         .modal-content {
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: #383838;
+            border: 1px solid #555;
             border-radius: 12px;
             padding: 30px;
             max-width: 520px;
@@ -315,7 +319,7 @@ WORKSPACE_TEMPLATE = '''
         
         .modal-header {
             font-size: 24px;
-            color: #60a5fa;
+            color: #cccccc;
             margin-bottom: 20px;
         }
         
@@ -325,7 +329,7 @@ WORKSPACE_TEMPLATE = '''
         
         .form-group label {
             display: block;
-            color: #cbd5e1;
+            color: #cccccc;
             margin-bottom: 8px;
             font-size: 14px;
         }
@@ -333,16 +337,16 @@ WORKSPACE_TEMPLATE = '''
         .form-group input {
             width: 100%;
             padding: 12px;
-            background: #0f172a;
-            border: 1px solid #475569;
+            background: #2d2d2d;
+            border: 1px solid #666;
             border-radius: 8px;
-            color: #e2e8f0;
+            color: #e0e0e0;
             font-size: 14px;
         }
         
         .form-group input:focus {
             outline: none;
-            border-color: #60a5fa;
+            border-color: #cccccc;
         }
         
         .form-actions {
@@ -360,19 +364,19 @@ WORKSPACE_TEMPLATE = '''
         .folder-mode-tab {
             flex: 1;
             padding: 10px;
-            background: #0f172a;
-            border: 2px solid #334155;
+            background: #2d2d2d;
+            border: 2px solid #555;
             border-radius: 8px;
-            color: #94a3b8;
+            color: #999999;
             cursor: pointer;
             font-size: 13px;
             text-align: center;
             transition: all 0.2s;
         }
         .folder-mode-tab.active {
-            border-color: #60a5fa;
-            color: #60a5fa;
-            background: #1e3a5f;
+            border-color: #cccccc;
+            color: #cccccc;
+            background: #3a3a3a;
         }
         .folder-with-file-section {
             display: none;
@@ -394,8 +398,8 @@ WORKSPACE_TEMPLATE = '''
         .left-panel {
             grid-column: 1;
             grid-row: 1 / 3;
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: #383838;
+            border: 1px solid #555;
             border-radius: 12px;
             padding: 20px;
             display: flex;
@@ -413,7 +417,7 @@ WORKSPACE_TEMPLATE = '''
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #0f172a;
+            background: #2d2d2d;
             border-bottom: 1px solid #334155;
             border-radius: 12px 12px 0 0;
             margin: -15px -15px 10px -15px;
@@ -424,12 +428,12 @@ WORKSPACE_TEMPLATE = '''
             display: block;
             width: 60px;
             height: 4px;
-            background: #334155;
+            background: #4a4a4a;
             border-radius: 2px;
             transition: background 0.2s;
         }
         .row-resizer:hover, .row-resizer.dragging { background: rgba(59,130,246,0.2); }
-        .row-resizer:hover::after, .row-resizer.dragging::after { background: #3b82f6; }
+        .row-resizer:hover::after, .row-resizer.dragging::after { background: #555555; }
 
         .panel-resizer {
             grid-column: 2;
@@ -450,7 +454,7 @@ WORKSPACE_TEMPLATE = '''
             content: '';
             width: 3px;
             height: 50px;
-            background: #334155;
+            background: #4a4a4a;
             border-radius: 3px;
         }
         .panel-resizer:hover::after, .panel-resizer.dragging::after {
@@ -469,8 +473,8 @@ WORKSPACE_TEMPLATE = '''
 
         .editor-window {
             flex: 1 1 0;
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: #383838;
+            border: 1px solid #555;
             border-radius: 12px;
             padding: 20px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
@@ -482,8 +486,8 @@ WORKSPACE_TEMPLATE = '''
 
         .command-line {
             flex: 0 0 var(--terminal-height, 180px);
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: #383838;
+            border: 1px solid #555;
             border-radius: 12px;
             padding: 15px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
@@ -494,8 +498,8 @@ WORKSPACE_TEMPLATE = '''
         }
         
         .info-section {
-            background: #0f172a;
-            border: 1px solid #334155;
+            background: #2d2d2d;
+            border: 1px solid #555;
             border-radius: 8px 8px 0 0;
             padding: 12px;
             font-size: 12px;
@@ -504,7 +508,7 @@ WORKSPACE_TEMPLATE = '''
         }
         
         .info-section strong {
-            color: #60a5fa;
+            color: #cccccc;
             display: block;
             margin-bottom: 8px;
         }
@@ -512,7 +516,7 @@ WORKSPACE_TEMPLATE = '''
         .github-repos { margin-top: 8px; }
         
         .repo-item {
-            background: #1e293b;
+            background: #383838;
             padding: 8px 10px;
             border-radius: 6px;
             margin: 5px 0;
@@ -525,13 +529,13 @@ WORKSPACE_TEMPLATE = '''
         .repo-name { color: #22c55e; }
         
         .info-section p {
-            color: #94a3b8;
+            color: #999999;
             margin: 3px 0;
         }
         
         .file-tree {
-            background: #0f172a;
-            border: 1px solid #334155;
+            background: #2d2d2d;
+            border: 1px solid #555;
             border-radius: 8px 8px 0 0;
             padding: 15px;
             padding-right: 6px;
@@ -543,8 +547,8 @@ WORKSPACE_TEMPLATE = '''
         .box-resizer {
             height: 8px;
             cursor: row-resize;
-            background: #0a1120;
-            border: 1px solid #334155;
+            background: #252525;
+            border: 1px solid #555;
             border-top: none;
             border-radius: 0 0 8px 8px;
             display: flex;
@@ -577,7 +581,7 @@ WORKSPACE_TEMPLATE = '''
         }
 
         .file-tree-title {
-            color: #60a5fa;
+            color: #cccccc;
             font-weight: bold;
             font-size: 14px;
             flex: 1;
@@ -650,7 +654,7 @@ WORKSPACE_TEMPLATE = '''
         .file-item:hover .delete-btn,
         .subfolder-header:hover .delete-btn {
             opacity: 1;
-            color: #94a3b8;
+            color: #999999;
         }
         .delete-btn:hover {
             color: #ef4444 !important;
@@ -665,7 +669,7 @@ WORKSPACE_TEMPLATE = '''
             font-weight: bold;
             font-size: 13px;
             padding: 6px 10px;
-            background: #1e293b;
+            background: #383838;
             border-radius: 6px;
             margin-bottom: 5px;
             cursor: pointer;
@@ -676,7 +680,7 @@ WORKSPACE_TEMPLATE = '''
             align-items: center;
         }
         
-        .repo-folder-header:hover { background: #334155; }
+        .repo-folder-header:hover { background: #4a4a4a; }
         
         .repo-folder-header::before {
             content: '▼ ';
@@ -698,7 +702,7 @@ WORKSPACE_TEMPLATE = '''
             font-weight: bold;
             font-size: 12px;
             padding: 4px 8px;
-            background: #0f172a;
+            background: #2d2d2d;
             border-radius: 4px;
             margin-bottom: 3px;
             user-select: none;
@@ -708,7 +712,7 @@ WORKSPACE_TEMPLATE = '''
             gap: 4px;
         }
         
-        .subfolder-header:hover { background: #1e293b; }
+        .subfolder-header:hover { background: #383838; }
 
         .subfolder-arrow {
             color: #f59e0b;
@@ -728,8 +732,8 @@ WORKSPACE_TEMPLATE = '''
         }
         
         .repo-action-btn {
-            background: #1e3a5f;
-            color: #60a5fa;
+            background: #3a3a3a;
+            color: #cccccc;
             border: 1px solid #2d5a8f;
             padding: 2px 6px;
             border-radius: 4px;
@@ -745,12 +749,12 @@ WORKSPACE_TEMPLATE = '''
             opacity: 1;
         }
         .repo-action-btn:hover {
-            background: #2d5a8f;
+            background: #4a4a4a;
             color: white;
-            border-color: #60a5fa;
+            border-color: #cccccc;
         }
         
-        .repo-action-btn:hover { background: #3b82f6; }
+        .repo-action-btn:hover { background: #555555; }
         
         .repo-folder-files {
             display: block;
@@ -771,15 +775,15 @@ WORKSPACE_TEMPLATE = '''
             border-radius: 6px;
             margin: 2px 0;
             font-size: 12px;
-            color: #cbd5e1;
+            color: #cccccc;
             transition: all 0.2s;
             display: flex;
             align-items: center;
             gap: 6px;
         }
         
-        .file-item:hover { background: #1e293b; color: #60a5fa; }
-        .file-item.active { background: #3b82f6; color: white; }
+        .file-item:hover { background: #383838; color: #cccccc; }
+        .file-item.active { background: #555555; color: white; }
         
         .file-item.subfolder-file { padding-left: 20px; }
 
@@ -795,8 +799,8 @@ WORKSPACE_TEMPLATE = '''
             transition: color 0.15s, background 0.15s;
         }
         .drag-handle:hover {
-            color: #60a5fa;
-            background: #1e3a5f;
+            color: #cccccc;
+            background: #3a3a3a;
         }
         .drag-handle:active { cursor: grabbing; }
 
@@ -809,7 +813,7 @@ WORKSPACE_TEMPLATE = '''
 
         .file-item.dragging {
             opacity: 0.4;
-            background: #1e293b;
+            background: #383838;
         }
         .file-item.drag-over-top {
             border-top: 2px solid #60a5fa;
@@ -836,25 +840,25 @@ WORKSPACE_TEMPLATE = '''
         }
         
         .tool-button {
-            background: #0f172a;
+            background: #2d2d2d;
             border: 2px solid #60a5fa;
             border-radius: 8px;
             padding: 12px 20px;
             font-size: 15px;
-            color: #60a5fa;
+            color: #cccccc;
             cursor: pointer;
             transition: all 0.3s;
             font-weight: 600;
         }
         
         .tool-button:hover {
-            background: #1e293b;
-            border-color: #3b82f6;
+            background: #383838;
+            border-color: #aaaaaa;
         }
         
         .tool-description {
             font-size: 12px;
-            color: #94a3b8;
+            color: #999999;
             margin-left: 10px;
             line-height: 1.5;
         }
@@ -867,30 +871,30 @@ WORKSPACE_TEMPLATE = '''
         
         .nav-button {
             flex: 1;
-            background: #334155;
-            border: 1px solid #475569;
+            background: #4a4a4a;
+            border: 1px solid #666;
             border-radius: 8px;
             padding: 10px 20px;
             font-size: 13px;
-            color: #e2e8f0;
+            color: #e0e0e0;
             cursor: pointer;
             transition: all 0.3s;
         }
         
         .nav-button:hover {
-            background: #475569;
-            border-color: #60a5fa;
+            background: #555555;
+            border-color: #cccccc;
         }
         
         .window-header {
-            background: #0f172a;
-            border: 1px solid #334155;
+            background: #2d2d2d;
+            border: 1px solid #555;
             padding: 12px 20px;
             font-size: 14px;
             font-weight: bold;
             margin-bottom: 15px;
             border-radius: 8px;
-            color: #60a5fa;
+            color: #cccccc;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -900,32 +904,32 @@ WORKSPACE_TEMPLATE = '''
         
         .current-file {
             font-size: 13px;
-            color: #94a3b8;
+            color: #999999;
             font-weight: normal;
         }
         
         #monaco-editor {
             flex: 1;
-            border: 1px solid #334155;
+            border: 1px solid #555;
             border-radius: 8px;
             overflow: hidden;
         }
         
         .command-header {
-            background: #0f172a;
-            border: 1px solid #334155;
+            background: #2d2d2d;
+            border: 1px solid #555;
             padding: 10px 20px;
             font-size: 13px;
             font-weight: bold;
             margin-bottom: 10px;
             border-radius: 8px;
-            color: #60a5fa;
+            color: #cccccc;
         }
         
         .command-content {
             background: #000;
             color: #0f0;
-            border: 1px solid #334155;
+            border: 1px solid #555;
             padding: 15px;
             font-family: 'Courier New', monospace;
             font-size: 12px;
@@ -945,8 +949,8 @@ WORKSPACE_TEMPLATE = '''
             <div class="form-group">
                 <label>GitHub Personal Access Token</label>
                 <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx">
-                <p style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
-                    Create token at: <a href="https://github.com/settings/tokens" target="_blank" style="color: #60a5fa;">github.com/settings/tokens</a><br>
+                <p style="font-size: 11px; color: #999999; margin-top: 5px;">
+                    Create token at: <a href="https://github.com/settings/tokens" target="_blank" style="color: #cccccc;">github.com/settings/tokens</a><br>
                     Required scope: <code>repo</code>
                 </p>
             </div>
@@ -972,7 +976,7 @@ WORKSPACE_TEMPLATE = '''
             <div class="form-group">
                 <label>File Path</label>
                 <input type="text" id="new-file-path" placeholder="filename.py or folder/filename.py">
-                <p style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
+                <p style="font-size: 11px; color: #999999; margin-top: 5px;">
                     Examples: <code>test.py</code> or <code>utils/helper.py</code>
                 </p>
             </div>
@@ -1005,7 +1009,7 @@ WORKSPACE_TEMPLATE = '''
                 <label>Repository</label>
                 <div id="new-folder-repo-name" style="color: #22c55e; font-weight: bold; margin-bottom: 4px;"></div>
                 <div style="font-size: 11px; color: #64748b;">
-                    Creating inside: <span id="new-folder-parent-display" style="color: #94a3b8;">/ (root)</span>
+                    Creating inside: <span id="new-folder-parent-display" style="color: #999999;">/ (root)</span>
                 </div>
             </div>
 
@@ -1018,7 +1022,7 @@ WORKSPACE_TEMPLATE = '''
                 <div class="form-group">
                     <label>File Name inside new folder</label>
                     <input type="text" id="new-folder-filename" placeholder="main.py">
-                    <p style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
+                    <p style="font-size: 11px; color: #999999; margin-top: 5px;">
                         Creates an empty file inside the new folder
                     </p>
                 </div>
@@ -1035,7 +1039,7 @@ WORKSPACE_TEMPLATE = '''
         <div class="header-left">
             <a href="http://localhost:5000" class="btn btn-home">← Home</a>
             <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">Logout</button>
-            <h1>Developer Workspace</h1>
+            <h1 style="color:white;">Developer Workspace</h1>
         </div>
     </div>
     
@@ -1052,7 +1056,7 @@ WORKSPACE_TEMPLATE = '''
             
             <div class="info-section" id="vscode-box">
                 <strong>Visual Studio Code</strong>
-                <p style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">Opens with full Git integration</p>
+                <p style="font-size: 11px; color: #999999; margin-bottom: 8px;">Opens with full Git integration</p>
                 <div id="vscode-files" style="margin-top: 10px; overflow-y: auto;">
                     <p style="color: #64748b; font-size: 11px;">Load a file first</p>
                 </div>
@@ -1062,8 +1066,8 @@ WORKSPACE_TEMPLATE = '''
             <div class="file-tree" id="file-tree-box">
                 <div class="file-tree-header">
                     <div class="file-tree-title">Microservice Files</div>
-                    <button class="tree-header-btn tree-save-btn" onclick="saveAllEdits()" title="Save all unsaved edits locally">💾 Save All</button>
-                    <button class="tree-header-btn tree-commit-btn" onclick="commitAllEdits()" title="Push all saved edits to GitHub">⬆ Commit All</button>
+                    <button class="tree-header-btn tree-save-btn" onclick="saveAllEdits()" title="Save all unsaved edits locally"> Save All</button>
+                    <button class="tree-header-btn tree-commit-btn" onclick="commitAllEdits()" title="Push all saved edits to GitHub"> Commit All</button>
                 </div>
                 <div id="file-list">Loading...</div>
             </div>
@@ -1126,6 +1130,7 @@ $ </div>
         let pendingCreates = [];
         let pendingCreateFolders = {};
         let lastSavedPath = '';
+        let _pendingPushContent = null;
         
         require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
         
@@ -1206,13 +1211,13 @@ $ </div>
         // ─── Create new file ──────────────────────────────────────────────
         async function createNewFile() {
             const filePath = document.getElementById('new-file-path').value.trim();
-            if (!filePath) { addTerminalLine('✗ Please enter a file path'); return; }
-            if (!selectedRepoForNewFile) { addTerminalLine('✗ No repository selected'); return; }
+            if (!filePath) { addTerminalLine(' Please enter a file path'); return; }
+            if (!selectedRepoForNewFile) { addTerminalLine(' No repository selected'); return; }
 
             pendingCreates.push({ repo: selectedRepoForNewFile, path: filePath });
             closeNewFileModal();
             await loadFileList();
-            addTerminalLine(`✓ Staged new file ${filePath} — hit Save All then Commit All to push`);
+            addTerminalLine(` Staged new file ${filePath} — hit Save All then Commit All to push`);
 
             const fileName = filePath.split('/').pop();
             editor.setValue('');
@@ -1233,8 +1238,8 @@ $ </div>
         // ─── Create new folder ────────────────────────────────────────────
         async function createNewFolder() {
             const folderName = document.getElementById('new-folder-name').value.trim();
-            if (!folderName) { addTerminalLine('✗ Please enter a folder name'); return; }
-            if (!selectedRepoForNewFolder) { addTerminalLine('✗ No repository selected'); return; }
+            if (!folderName) { addTerminalLine(' Please enter a folder name'); return; }
+            if (!selectedRepoForNewFolder) { addTerminalLine(' No repository selected'); return; }
 
             const folderPath = selectedFolderParentPath
                 ? selectedFolderParentPath + '/' + folderName
@@ -1243,7 +1248,7 @@ $ </div>
             let targetPath;
             if (folderCreateMode === 'with-file') {
                 const fileName = document.getElementById('new-folder-filename').value.trim();
-                if (!fileName) { addTerminalLine('✗ Please enter a file name'); return; }
+                if (!fileName) { addTerminalLine(' Please enter a file name'); return; }
                 targetPath = folderPath + '/' + fileName;
             } else {
                 targetPath = folderPath + '/.gitkeep';
@@ -1257,9 +1262,9 @@ $ </div>
 
             await loadFileList();
             if (folderCreateMode === 'with-file') {
-                addTerminalLine(`✓ Staged new folder ${folderPath} — hit Save All then Commit All to push`);
+                addTerminalLine(` Staged new folder ${folderPath} — hit Save All then Commit All to push`);
             } else {
-                addTerminalLine(`✓ Staged empty folder ${folderPath} — hit Save All then Commit All to push`);
+                addTerminalLine(` Staged empty folder ${folderPath} — hit Save All then Commit All to push`);
             }
         }
         
@@ -1306,7 +1311,7 @@ $ </div>
             const token = document.getElementById('github-token').value.trim();
             const owner = document.getElementById('github-owner').value.trim();
             const repo  = document.getElementById('github-repo').value.trim();
-            if (!token || !owner || !repo) { addTerminalLine('✗ Please fill in all fields'); return; }
+            if (!token || !owner || !repo) { addTerminalLine(' Please fill in all fields'); return; }
             
             const response = await fetch('/api/add-github-repo', {
                 method: 'POST',
@@ -1321,9 +1326,9 @@ $ </div>
                 document.getElementById('github-repo').value = '';
                 await loadGithubRepos();
                 await loadFileList();
-                addTerminalLine(`✓ Added repository: ${owner}/${repo}`);
+                addTerminalLine(` Added repository: ${owner}/${repo}`);
             } else {
-                addTerminalLine(`✗ Failed: ${data.error}`);
+                addTerminalLine(` Failed: ${data.error}`);
             }
         }
         
@@ -1548,7 +1553,7 @@ $ </div>
                             const sfDelBtn = document.createElement('button');
                             sfDelBtn.className = 'delete-btn';
                             if (folderIsPendingDel) {
-                                sfDelBtn.textContent = '↩';
+                                sfDelBtn.textContent = '';
                                 sfDelBtn.style.color = '#f97316';
                                 sfDelBtn.title = `Undo staged deletion of folder ${folderName}`;
                                 sfDelBtn.onclick = e => { e.stopPropagation(); unstageFolderDelete(folderName, repoName); };
@@ -1583,7 +1588,7 @@ $ </div>
 
                                 const delBtn = document.createElement('button');
                                 delBtn.className = 'delete-btn';
-                                delBtn.textContent = isPendingDel ? '↩' : '✕';
+                                delBtn.textContent = isPendingDel ? '' : '✕';
                                 delBtn.title = isPendingDel ? `Undo staged delete for ${file.name}` : `Delete ${file.name}`;
                                 if (isPendingDel) {
                                     delBtn.style.color = '#f97316';
@@ -1622,7 +1627,7 @@ $ </div>
 
                             const delBtn = document.createElement('button');
                             delBtn.className = 'delete-btn';
-                            delBtn.textContent = isPendingDel ? '↩' : '✕';
+                            delBtn.textContent = isPendingDel ? '' : '✕';
                             delBtn.title = isPendingDel ? `Undo staged delete for ${file.name}` : `Delete ${file.name}`;
                             if (isPendingDel) {
                                 delBtn.style.color = '#f97316';
@@ -1645,7 +1650,7 @@ $ </div>
                     addTerminalLine(`Found ${data.files.length} files`);
                     updateVSCodeFileList(data.files);
                 } else {
-                    fileList.innerHTML = '<div style="color: #94a3b8;">No files found</div>';
+                    fileList.innerHTML = '<div style="color: #999999;">No files found</div>';
                     updateVSCodeFileList([]);
                 }
             } catch (error) {
@@ -1664,7 +1669,7 @@ $ </div>
         }
         
         async function openCurrentInVSCode() {
-            if (!currentFile) { addTerminalLine('✗ Load a file first'); return; }
+            if (!currentFile) { addTerminalLine(' Load a file first'); return; }
             try {
                 const response = await fetch('/api/open-in-vscode-git', {
                     method: 'POST',
@@ -1673,13 +1678,13 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(`✓ Opened in VS Code: ${data.repo_path}`);
+                    addTerminalLine(` Opened in VS Code: ${data.repo_path}`);
                     addTerminalLine('You can now commit/push from VS Code');
                 } else {
-                    addTerminalLine(`✗ Error: ${data.error}`);
+                    addTerminalLine(` Error: ${data.error}`);
                 }
             } catch (error) {
-                addTerminalLine(`✗ Error: ${error.message}`);
+                addTerminalLine(` Error: ${error.message}`);
             }
         }
         
@@ -1730,18 +1735,16 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(`✓ Saved ${currentFile} locally`);
+                    addTerminalLine(` Saved ${currentFile} locally`);
                 } else {
-                    addTerminalLine(`✗ Error: ${data.error}`);
+                    addTerminalLine(` Error: ${data.error}`);
                 }
             } catch (error) {
-                addTerminalLine(`✗ Error: ${error.message}`);
+                addTerminalLine(` Error: ${error.message}`);
             }
         }
         
-        async function commitToGithub() {
-            if (!currentFilePath) { addTerminalLine('Not a GitHub file'); return; }
-            const content = editor.getValue();
+        async function doPush(content) {
             try {
                 const response = await fetch('/api/save-file', {
                     method: 'POST',
@@ -1751,21 +1754,87 @@ $ </div>
                 const data = await response.json();
                 if (data.success) {
                     if (data.sha) currentSha = data.sha;
-                    addTerminalLine(`✓ Pushed to ${currentRepo}`);
+                    addTerminalLine(`Pushed ${currentFile} to GitHub successfully.`);
+                } else {
+                    addTerminalLine(`Push failed: ${data.error}`);
+                }
+            } catch(e) {
+                addTerminalLine(`Push error: ${e.message}`);
+            }
+        }
+
+        async function commitToGithub() {
+            if (!currentFilePath) { addTerminalLine('Not a GitHub file'); return; }
+            const content = editor.getValue();
+
+            // Pre-push lint check for Python files
+            if (currentFile.endsWith('.py')) {
+                addTerminalLine('Running lint check before push...');
+                try {
+                    const lr = await fetch('/api/pre-push-lint', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ content, filename: currentFile })
+                    });
+                    const ld = await lr.json();
+                    if (!ld.passed) {
+                        addTerminalLine(`LINT FAILED — push blocked. ${currentFile} has issues:`);
+                        ld.issues.forEach(i => addTerminalLine('  ' + i));
+                        addTerminalLine(`Fix the issues in ${currentFile} above then try pushing again.`);
+                        return;
+                    }
+                    addTerminalLine('Lint passed — pipeline must run before push.');
+                } catch(e) {
+                    addTerminalLine('Could not run lint check.');
+                    return;
+                }
+            }
+
+            // Show pipeline modal BEFORE pushing — push only happens after pipeline runs
+            showPipelineModal(currentRepo, content);
+            return;
+
+            try {
+                const response = await fetch('/api/save-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filepath: currentFilePath, content, source: 'github', repo: currentRepo, sha: currentSha, commit: true })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    if (data.sha) currentSha = data.sha;
+                    addTerminalLine(` Pushed to ${currentRepo}`);
                     fetch('/api/trigger-lint', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ repo: currentRepo })
                     }).then(r => r.json()).then(d => {
-                        if (d.success) addTerminalLine(`✓ Lint triggered for ${currentRepo} — check Jenkins`);
-                        else addTerminalLine(`⚠ Could not trigger lint: ${d.error}`);
+                        if (d.success) {
+                            addTerminalLine(`Lint triggered for ${currentRepo} — polling result...`);
+                            let polls = 0;
+                            const pollLint = setInterval(async () => {
+                                polls++;
+                                if (polls > 24) { clearInterval(pollLint); addTerminalLine(' Lint check timed out — check Jenkins manually'); return; }
+                                try {
+                                    const lr = await fetch('/api/check-lint-result', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+                                    const ld = await lr.json();
+                                    if (!ld.building && ld.result) {
+                                        clearInterval(pollLint);
+                                        if (ld.result === 'SUCCESS') addTerminalLine(`Jenkins lint PASSED — all repo files are clean, safe to merge`);
+                                        else addTerminalLine(`Jenkins lint found issues in other repo files — check Jenkins for details`);
+                                    }
+                                } catch(e) {}
+                            }, 5000);
+                        } else addTerminalLine(` Could not trigger lint: ${d.error}`);
                     }).catch(() => {});
-                    showPipelineModal(currentRepo);
+                    // Don't push yet - show pipeline modal first
+                    // Push will happen after pipeline runs successfully
+                    showPipelineModal(currentRepo, content);
                 } else {
-                    addTerminalLine(`✗ Error: ${data.error}`);
+                    addTerminalLine(`Error: ${data.error}`);
                 }
             } catch (error) {
-                addTerminalLine(`✗ Error: ${error.message}`);
+                addTerminalLine(`Error: ${error.message}`);
             }
         }
         
@@ -1781,7 +1850,7 @@ $ </div>
                 if (data.content !== undefined) {
                     editor.setValue(data.content);
                     currentSha = data.sha || currentSha;
-                    addTerminalLine(`✓ Reloaded from GitHub (cleared local save)`);
+                    addTerminalLine(` Reloaded from GitHub (cleared local save)`);
                     editor.focus();
                 } else {
                     addTerminalLine(`Error: ${data.error}`);
@@ -1824,13 +1893,13 @@ $ </div>
                 });
                 const d = await r.json();
                 if (d.success) {
-                    addTerminalLine(`↩ Unstaged delete for ${filepath.split('/').pop()}`);
+                    addTerminalLine(` Unstaged delete for ${filepath.split('/').pop()}`);
                     await loadPendingDeletes();
                     await loadFileList();
                 } else {
-                    addTerminalLine(`✗ Undo failed: ${d.error}`);
+                    addTerminalLine(` Undo failed: ${d.error}`);
                 }
-            } catch(e) { addTerminalLine(`✗ Error: ${e.message}`); }
+            } catch(e) { addTerminalLine(` Error: ${e.message}`); }
         }
 
         async function unstageFolderDelete(folderName, repo) {
@@ -1842,13 +1911,13 @@ $ </div>
                 });
                 const d = await r.json();
                 if (d.success) {
-                    addTerminalLine(`↩ Unstaged deletion of folder ${folderName} (${d.restored} file(s) restored)`);
+                    addTerminalLine(` Unstaged deletion of folder ${folderName} (${d.restored} file(s) restored)`);
                     await loadPendingDeletes();
                     await loadFileList();
                 } else {
-                    addTerminalLine(`✗ Undo failed: ${d.error}`);
+                    addTerminalLine(` Undo failed: ${d.error}`);
                 }
-            } catch(e) { addTerminalLine(`✗ Error: ${e.message}`); }
+            } catch(e) { addTerminalLine(` Error: ${e.message}`); }
         }
 
         async function confirmDeleteFile(filepath, sha, repo) {
@@ -1862,7 +1931,7 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(`✓ Staged delete: ${filepath} — hit Commit All to push to GitHub`);
+                    addTerminalLine(` Staged delete: ${filepath} — hit Commit All to push to GitHub`);
                     if (currentFilePath === filepath) {
                         currentFile = ''; currentFilePath = ''; currentRepo = ''; currentSha = '';
                         editor.setValue('');
@@ -1872,9 +1941,9 @@ $ </div>
                     await loadPendingDeletes();
                     await loadFileList();
                 } else {
-                    addTerminalLine(`✗ Stage delete failed: ${data.error}`);
+                    addTerminalLine(` Stage delete failed: ${data.error}`);
                 }
-            } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
+            } catch (e) { addTerminalLine(` Error: ${e.message}`); }
         }
 
         async function confirmDeleteFolder(folderName, repo) {
@@ -1888,7 +1957,7 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(`✓ Staged ${data.staged} files for deletion — hit Commit All to push to GitHub`);
+                    addTerminalLine(` Staged ${data.staged} files for deletion — hit Commit All to push to GitHub`);
                     if (currentFilePath.startsWith(folderName + '/')) {
                         currentFile = ''; currentFilePath = ''; currentRepo = ''; currentSha = '';
                         editor.setValue('');
@@ -1898,9 +1967,9 @@ $ </div>
                     await loadPendingDeletes();
                     await loadFileList();
                 } else {
-                    addTerminalLine(`✗ Stage delete failed: ${data.error}`);
+                    addTerminalLine(` Stage delete failed: ${data.error}`);
                 }
-            } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
+            } catch (e) { addTerminalLine(` Error: ${e.message}`); }
         }
 
         async function saveAllEdits() {
@@ -1917,12 +1986,12 @@ $ </div>
                     const data = await response.json();
                     if (data.success) {
                         lastSavedPath = currentFilePath;
-                        addTerminalLine(`✓ Saved ${currentFile} locally`);
+                        addTerminalLine(` Saved ${currentFile} locally`);
                         savedAnything = true;
                     } else {
-                        addTerminalLine(`✗ Save failed: ${data.error}`);
+                        addTerminalLine(` Save failed: ${data.error}`);
                     }
-                } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
+                } catch (e) { addTerminalLine(` Error: ${e.message}`); }
             }
 
             if (pendingCreates.length > 0) {
@@ -1937,16 +2006,16 @@ $ </div>
                         });
                         const d = await r.json();
                         if (d.success) {
-                            addTerminalLine(`✓ Created ${pc.path} on GitHub`);
+                            addTerminalLine(` Created ${pc.path} on GitHub`);
                             if (pc.folderPath && pendingCreateFolders[pc.repo]) {
                                 pendingCreateFolders[pc.repo].delete(pc.folderPath);
                             }
                             savedAnything = true;
                         } else {
-                            addTerminalLine(`✗ Failed to create ${pc.path}: ${d.error}`);
+                            addTerminalLine(` Failed to create ${pc.path}: ${d.error}`);
                             pendingCreates.push(pc);
                         }
-                    } catch(e) { addTerminalLine(`✗ Error creating ${pc.path}: ${e.message}`); pendingCreates.push(pc); }
+                    } catch(e) { addTerminalLine(` Error creating ${pc.path}: ${e.message}`); pendingCreates.push(pc); }
                 }
                 await loadFileList();
             }
@@ -1955,7 +2024,7 @@ $ </div>
             let stagedCount = 0;
             for (const items of Object.values(pending)) stagedCount += items.length;
             if (stagedCount > 0) {
-                addTerminalLine(`✓ ${stagedCount} deletion(s) staged — hit Commit All to push to GitHub`);
+                addTerminalLine(` ${stagedCount} deletion(s) staged — hit Commit All to push to GitHub`);
                 savedAnything = true;
             }
 
@@ -1978,7 +2047,7 @@ $ </div>
                     if (data.success) {
                         if (data.sha) currentSha = data.sha;
                         lastSavedPath = '';
-                        addTerminalLine(`✓ Committed & pushed ${currentFile} to GitHub`);
+                        addTerminalLine(` Committed & pushed ${currentFile} to GitHub`);
                         didSomething = true;
                         fileContentWasPushed = true;
                         fetch('/api/trigger-lint', {
@@ -1986,15 +2055,15 @@ $ </div>
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ repo: currentRepo })
                         }).then(r => r.json()).then(d => {
-                            if (d.success) addTerminalLine(`✓ Lint triggered for ${currentRepo} — check Jenkins`);
-                            else addTerminalLine(`⚠ Could not trigger lint: ${d.error}`);
+                            if (d.success) addTerminalLine(` Lint triggered for ${currentRepo} — check Jenkins`);
+                            else addTerminalLine(` Could not trigger lint: ${d.error}`);
                         }).catch(() => {});
                     } else {
-                        addTerminalLine(`✗ Commit failed: ${data.error}`);
+                        addTerminalLine(` Commit failed: ${data.error}`);
                     }
-                } catch (e) { addTerminalLine(`✗ Error: ${e.message}`); }
+                } catch (e) { addTerminalLine(` Error: ${e.message}`); }
             } else if (currentFilePath && lastSavedPath !== currentFilePath) {
-                addTerminalLine(`⚠ ${currentFile} has unsaved changes — hit Save All first`);
+                addTerminalLine(` ${currentFile} has unsaved changes — hit Save All first`);
             }
 
             const pending = await (await fetch('/api/pending-deletes')).json();
@@ -2008,12 +2077,12 @@ $ </div>
                     });
                     const d = await r.json();
                     if (d.success) {
-                        addTerminalLine(`✓ Committed ${d.deleted} deletion(s) to ${repo}`);
+                        addTerminalLine(` Committed ${d.deleted} deletion(s) to ${repo}`);
                         didSomething = true;
                     } else {
-                        addTerminalLine(`✗ Delete commit failed: ${d.error}`);
+                        addTerminalLine(` Delete commit failed: ${d.error}`);
                     }
-                } catch(e) { addTerminalLine(`✗ Error: ${e.message}`); }
+                } catch(e) { addTerminalLine(` Error: ${e.message}`); }
             }
 
             if (!didSomething) { addTerminalLine('Nothing to commit'); }
@@ -2127,7 +2196,8 @@ $ </div>
         // ─── Jenkins Pipeline Modal ───────────────────────────────────────
         let _pipelineRepo = null;
 
-        async function showPipelineModal(repo) {
+        async function showPipelineModal(repo, pendingContent) {
+            _pendingPushContent = pendingContent || null;
             _pipelineRepo = repo;
             const status = document.getElementById('pipeline-modal-status');
             status.textContent = '';
@@ -2150,7 +2220,7 @@ $ </div>
 
             if (data.pipeline) {
                 msg.textContent = `Repo "${repo}" is already linked to a Jenkins pipeline:`;
-                document.getElementById('pipeline-linked-name').textContent = '✓ ' + data.pipeline;
+                document.getElementById('pipeline-linked-name').textContent = ' ' + data.pipeline;
                 linkedSection.style.display   = 'block';
                 unlinkedSection.style.display = 'none';
                 linkBtn.textContent = 'Update Link';
@@ -2215,27 +2285,101 @@ $ </div>
         async function runLinkedPipeline(pipelineName) {
             const status = document.getElementById('pipeline-modal-status');
             status.style.color = '#94a3b8';
-            status.textContent = `Triggering ${pipelineName}...`;
+            addTerminalLine('Getting current build number before triggering...');
+
+            // Step 1: get build number BEFORE triggering
+            let buildNumBefore = 0;
             try {
-                const res  = await fetch('/api/run-pipeline', {
+                const preR = await fetch('/api/check-pipeline-result', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pipeline: pipelineName })
+                });
+                const preD = await preR.json();
+                buildNumBefore = preD.number || 0;
+                addTerminalLine('Build number before trigger: ' + buildNumBefore);
+            } catch(e) {
+                addTerminalLine('Could not get pre-trigger build number: ' + e.message);
+            }
+
+            // Step 2: trigger the pipeline
+            status.textContent = 'Triggering ' + pipelineName + '...';
+            addTerminalLine('Triggering pipeline: ' + pipelineName);
+            try {
+                const res = await fetch('/api/run-pipeline', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ pipeline: pipelineName })
                 });
                 const data = await res.json();
-                if (data.success) {
-                    status.style.color = '#22c55e';
-                    status.textContent = `✓ Pipeline "${pipelineName}" triggered! Check Jenkins for results.`;
-                    addTerminalLine(`✓ Triggered pipeline: ${pipelineName}`);
-                    setTimeout(closePipelineModal, 2000);
-                } else {
+                if (!data.success) {
                     status.style.color = '#ef4444';
-                    status.textContent = `✗ Failed to trigger: ${data.error}`;
+                    status.textContent = 'Failed to trigger: ' + data.error;
+                    addTerminalLine('Failed to trigger pipeline: ' + data.error);
+                    return;
                 }
+                addTerminalLine('Pipeline triggered — waiting 8 seconds for Jenkins to register build...');
+                status.textContent = 'Pipeline queued — waiting for Jenkins...';
+                await new Promise(r => setTimeout(r, 8000));
+
+                // Step 3: poll until new build number appears and completes
+                let polls = 0;
+                const pollPipeline = setInterval(async () => {
+                    polls++;
+                    if (polls > 40) {
+                        clearInterval(pollPipeline);
+                        status.style.color = '#ef4444';
+                        status.textContent = 'Pipeline timed out — push cancelled.';
+                        addTerminalLine('Pipeline timed out — push cancelled.');
+                        return;
+                    }
+                    try {
+                        const pr = await fetch('/api/check-pipeline-result', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ pipeline: pipelineName })
+                        });
+                        const pd = await pr.json();
+                        const isNewBuild = (pd.number || 0) > buildNumBefore;
+                        const isComplete = pd.building === false && pd.result !== null && pd.result !== undefined && pd.result !== '';
+                        addTerminalLine('Poll ' + polls + ': build#=' + pd.number + ' building=' + pd.building + ' result=' + pd.result + ' isNew=' + isNewBuild);
+                        if (isNewBuild && isComplete) {
+                            clearInterval(pollPipeline);
+                            if (pd.result === 'SUCCESS') {
+                                status.style.color = '#22c55e';
+                                status.textContent = 'Pipeline passed — pushing to GitHub...';
+                                addTerminalLine('Pipeline passed — pushing to GitHub...');
+                                closePipelineModal();
+                                if (_pendingPushContent !== null) {
+                                    await doPush(_pendingPushContent);
+                                    _pendingPushContent = null;
+                                } else {
+                                    addTerminalLine('Warning: no pending content to push.');
+                                }
+                            } else {
+                                status.style.color = '#ef4444';
+                                status.textContent = 'Pipeline FAILED — push blocked. Fix issues then retry.';
+                                addTerminalLine('Pipeline FAILED — push blocked. Fix issues then retry.');
+                            }
+                        } else if (!isNewBuild) {
+                            addTerminalLine('Waiting for new build to start...');
+                        } else {
+                            addTerminalLine('Build running — waiting for completion...');
+                        }
+                    } catch(e) {
+                        addTerminalLine('Poll error: ' + e.message);
+                    }
+                }, 5000);
             } catch(e) {
                 status.style.color = '#ef4444';
-                status.textContent = `✗ Error: ${e.message}`;
+                status.textContent = 'Error: ' + e.message;
+                addTerminalLine('Error: ' + e.message);
             }
+        }
+
+        function cancelPush() {
+            closePipelineModal();
+            addTerminalLine('Push cancelled — run the pipeline first before pushing to GitHub.');
         }
 
         function closePipelineModal() {
@@ -2270,22 +2414,22 @@ $ </div>
                 try { data = JSON.parse(text); }
                 catch(e) {
                     status.style.color = '#ef4444';
-                    status.textContent = '✗ Server error: ' + text.substring(0, 120);
+                    status.textContent = ' Server error: ' + text.substring(0, 120);
                     document.getElementById('pipeline-modal-link').disabled = false;
                     return;
                 }
                 if (data.success) {
                     status.style.color = '#22c55e';
                     status.textContent = data.message;
-                    addTerminalLine('✓ ' + data.message);
+                    addTerminalLine(' ' + data.message);
                     setTimeout(closePipelineModal, 2000);
                 } else {
                     status.style.color = '#ef4444';
-                    status.textContent = '✗ ' + data.error;
+                    status.textContent = ' ' + data.error;
                 }
             } catch(e) {
                 status.style.color = '#ef4444';
-                status.textContent = '✗ ' + e.message;
+                status.textContent = ' ' + e.message;
             }
 
             document.getElementById('pipeline-modal-link').disabled = false;
@@ -2300,21 +2444,21 @@ $ </div>
 
         <!-- ── Jenkins Pipeline Modal ───────────────────────────────── -->
         <div id="pipeline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
-            <div style="background:#1e293b;border:1px solid #3b82f6;border-radius:12px;padding:30px;width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+            <div style="background:#383838;border:1px solid #3b82f6;border-radius:12px;padding:30px;width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                 <h3 style="color:#60a5fa;margin-bottom:6px;font-size:18px;">Link Jenkins Pipeline</h3>
                 <p id="pipeline-modal-msg" style="color:#94a3b8;font-size:13px;margin-bottom:20px;line-height:1.5;"></p>
 
                 <div id="pipeline-linked-section" style="display:none;margin-bottom:18px;">
-                    <div style="background:#0f172a;border:1px solid #22c55e;border-radius:6px;padding:10px 14px;color:#22c55e;font-size:13px;font-weight:600;" id="pipeline-linked-name"></div>
+                    <div style="background:#2a2a2a;border:1px solid #22c55e;border-radius:6px;padding:10px 14px;color:#22c55e;font-size:13px;font-weight:600;" id="pipeline-linked-name"></div>
                 </div>
 
                 <p id="pipeline-change-label" style="display:none;color:#f59e0b;font-size:12px;margin-bottom:10px;">
-                    ⚠ Pick a different pipeline or enter a new name to update the link:
+                     Pick a different pipeline or enter a new name to update the link:
                 </p>
                 <div id="pipeline-unlinked-section" style="display:none;margin-bottom:18px;">
                     <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">Pick an existing Jenkins pipeline:</label>
                     <select id="pipeline-existing-select"
-                        style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:6px;
+                        style="width:100%;background:#2a2a2a;border:1px solid #334155;border-radius:6px;
                                padding:8px 12px;color:#e2e8f0;font-size:14px;margin-bottom:14px;"
                         onchange="onExistingSelect()">
                         <option value="">— select existing job —</option>
@@ -2324,18 +2468,18 @@ $ </div>
 
                     <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">New pipeline name:</label>
                     <input id="pipeline-name-input" type="text" placeholder="e.g. my-pipeline"
-                        style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:6px;
+                        style="width:100%;background:#2a2a2a;border:1px solid #334155;border-radius:6px;
                                padding:8px 12px;color:#e2e8f0;font-size:14px;outline:none;"
                         oninput="onNameInput()" />
                 </div>
 
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button style="background:#334155;color:#94a3b8;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;"
-                        onclick="closePipelineModal()">Skip
+                        onclick="cancelPush()">Cancel
                     </button>
                     <button id="run-pipeline-btn"
                         style="display:none;background:#22c55e;color:white;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
-                        ▶ Run Pipeline
+                         Run Pipeline
                     </button>
                     <button id="pipeline-modal-link"
                         style="background:#3b82f6;color:white;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
@@ -2421,6 +2565,28 @@ def list_github_repos():
     repos = load_repos_from_file()
     return jsonify({'repos': [f"{r['owner']}/{r['repo']}" for r in repos]})
 
+
+def setup_branch_protection(token, owner, repo):
+    """Automatically set up branch protection when a repo is added"""
+    import urllib.request
+    try:
+        url = f'https://api.github.com/repos/{owner}/{repo}/branches/main/protection'
+        payload = {
+            "required_status_checks": None,
+            "enforce_admins": False,
+            "required_pull_request_reviews": None,
+            "restrictions": None
+        }
+        req = urllib.request.Request(url, method='PUT')
+        req.add_header('Authorization', f'token {token}')
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+        req.add_header('Content-Type', 'application/json')
+        urllib.request.urlopen(req, data=__import__('json').dumps(payload).encode(), timeout=10)
+        return True
+    except Exception as e:
+        print(f"Branch protection setup failed: {e}")
+        return False
+
 @app.route('/api/add-github-repo', methods=['POST'])
 def add_github_repo():
     data  = request.json
@@ -2436,6 +2602,7 @@ def add_github_repo():
             return jsonify({'success': False, 'error': 'Repository already added'})
     repos.append({'token': token, 'owner': owner, 'repo': repo})
     save_repos_to_file(repos)
+    setup_branch_protection(token, owner, repo)
     return jsonify({'success': True})
 
 @app.route('/api/remove-github-repo', methods=['POST'])
@@ -2749,9 +2916,16 @@ def trigger_lint():
                 headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
         except Exception:
             pass
-        params = urllib.parse.urlencode({'REPO': repo})
-        url = f'{JENKINS_URL}/job/lint/buildWithParameters?{params}'
-        req = urllib.request.Request(url, data=b'', headers=headers, method='POST')
+        # Get token for this repo
+        token = ''
+        repos = load_repos_from_file()
+        for r in repos:
+            if f"{r['owner']}/{r['repo']}" == repo:
+                token = r['token']
+                break
+        params = urllib.parse.urlencode({'REPO': repo, 'TOKEN': token}).encode()
+        url = f'{JENKINS_URL}/job/lint/buildWithParameters'
+        req = urllib.request.Request(url, data=params, headers=headers, method='POST')
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 return jsonify({'success': True})
@@ -2759,6 +2933,69 @@ def trigger_lint():
             return jsonify({'success': False, 'error': f'HTTP {e.code}: {e.reason}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+
+@app.route('/api/pre-push-lint', methods=['POST'])
+def pre_push_lint():
+    """Run flake8 locally on file content before pushing to GitHub"""
+    import subprocess, tempfile, os
+    data = request.get_json(force=True)
+    content = data.get('content', '')
+    filename = data.get('filename', 'file.py')
+    if not filename.endswith('.py'):
+        return jsonify({'passed': True, 'issues': []})
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(content)
+            tmp_path = f.name
+        result = subprocess.run(
+            ['python3', '-m', 'flake8', tmp_path,
+             '--max-line-length=120', '--ignore=E501,W503'],
+            capture_output=True, text=True
+        )
+        os.unlink(tmp_path)
+        issues = [line.replace(tmp_path, filename)
+                  for line in result.stdout.strip().split('\n') if line]
+        return jsonify({'passed': len(issues) == 0, 'issues': issues})
+    except Exception as e:
+        return jsonify({'passed': True, 'issues': [], 'error': str(e)})
+
+@app.route('/api/check-pipeline-result', methods=['POST'])
+def check_pipeline_result():
+    try:
+        import urllib.request, base64, json as _json, urllib.parse
+        data = request.get_json(force=True)
+        pipeline_name = data.get('pipeline', '').strip()
+        creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
+        req = urllib.request.Request(
+            f'{JENKINS_URL}/job/{urllib.parse.quote(pipeline_name)}/lastBuild/api/json',
+            headers={'Authorization': f'Basic {creds}'}
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            d = _json.loads(r.read().decode())
+            return jsonify({'result': d.get('result'), 'building': d.get('building'), 'number': d.get('number')})
+    except Exception as e:
+        return jsonify({'result': None, 'error': str(e)})
+
+@app.route('/api/check-lint-result', methods=['POST'])
+def check_lint_result():
+    try:
+        import urllib.request, base64, json as _json
+        creds = base64.b64encode(f'{JENKINS_USER}:{JENKINS_TOKEN}'.encode()).decode()
+        req = urllib.request.Request(
+            f'{JENKINS_URL}/job/lint/lastBuild/api/json',
+            headers={'Authorization': f'Basic {creds}'}
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = _json.loads(r.read().decode())
+            return jsonify({
+                'result': data.get('result'),
+                'building': data.get('building'),
+                'number': data.get('number')
+            })
+    except Exception as e:
+        return jsonify({'result': None, 'error': str(e)})
 
 @app.route('/api/list-jenkins-jobs')
 def list_jenkins_jobs():

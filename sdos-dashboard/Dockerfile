@@ -2,20 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y curl iputils-ping && \
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
-    chmod +x kubectl && \
-    mv kubectl /usr/local/bin/ && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    vagrant \
+    libvirt-clients \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir flask
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/v1.28.5/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/
 
-COPY app.py .
+# Install Python dependencies
+RUN pip install --no-cache-dir flask requests
 
-RUN mkdir -p /root/.kube
+# Copy dashboard files
+COPY . .
 
-EXPOSE 8080
-
-CMD ["python3", "app.py"]
+EXPOSE 5000 6001 7000 8080 9000

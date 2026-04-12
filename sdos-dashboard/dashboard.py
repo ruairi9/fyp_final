@@ -47,28 +47,31 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def get_real_node_metrics():
-    try:
-        result = subprocess.run(
-            ['kubectl', 'top', 'nodes', '--no-headers', f'--kubeconfig={KUBECONFIG_PATH}'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode != 0:
-            return {}
-        metrics = {}
-        for line in result.stdout.strip().split('\n'):
-            if line:
-                parts = line.split()
-                if len(parts) >= 5:
-                    node_name = parts[0]
-                    cpu_percent = parts[2].replace('%', '')
-                    mem_percent = parts[4].replace('%', '')
-                    metrics[node_name] = {
-                        'cpu': float(cpu_percent) if cpu_percent.replace('.','').isdigit() else 0.0,
-                        'memory': float(mem_percent) if mem_percent.replace('.','').isdigit() else 0.0
-                    }
-        return metrics
-    except Exception:
-        return {}
+    """Get CPU and RAM from each VM via vagrant ssh — matches server_dashboard VM LIST values"""
+    vagrant_map = get_node_names_to_vagrant()
+    metrics = {}
+    for k8s_name, vagrant_name in vagrant_map.items():
+        try:
+            result = subprocess.run(
+                ['vagrant', 'ssh', vagrant_name, '-c',
+                 "top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.1f\", 100-$8}'; echo; free | grep Mem | awk '{printf \"%.1f\", $3/$2*100}'"],
+                capture_output=True, text=True, timeout=15,
+                cwd=os.path.expanduser('~/fyp-cluster')
+            )
+            if result.returncode == 0:
+                lines = [l for l in result.stdout.strip().split('\n') if l.strip() and 'fog' not in l and 'WARNING' not in l]
+                if len(lines) >= 2:
+                    try:
+                        cpu = float(lines[0].strip())
+                        ram = float(lines[1].strip())
+                        metrics[k8s_name] = {'cpu': cpu, 'memory': ram}
+                    except:
+                        metrics[k8s_name] = {'cpu': 0.0, 'memory': 0.0}
+            else:
+                metrics[k8s_name] = {'cpu': 0.0, 'memory': 0.0}
+        except Exception:
+            metrics[k8s_name] = {'cpu': 0.0, 'memory': 0.0}
+    return metrics
 
 def get_node_names_to_vagrant():
     return {
@@ -176,63 +179,65 @@ DASHBOARD_TEMPLATE = """
     <meta http-equiv="Cache-Control" content="no-cache">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
-        .container { max-width: 1400px; margin: 0 auto; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a1a; color: #222; padding: 0; }
+        .outer { background: #1a1a1a; min-height: 100vh; padding: 30px; }
+        .container { max-width: 1400px; margin: 0 auto; background: #2d2d2d; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
         .header {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            padding: 20px 30px; border-radius: 15px; margin-bottom: 25px;
+            background: #2d2d2d;
+            padding: 20px 30px; margin-bottom: 25px;
             display: flex; justify-content: space-between; align-items: center;
-            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+            border-bottom: 4px solid #cc0000;
         }
-        .header h1 { font-size: 32px; }
+        .header h1 { font-size: 32px; color: #ffffff; }
         .header-left { display: flex; align-items: center; gap: 20px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .card { background: #1e293b; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #334155; }
-        .card h3 { color: #60a5fa; margin-bottom: 5px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 16px; }
-        .card .subtitle { color: #94a3b8; font-size: 11px; margin-bottom: 15px; font-style: italic; }
-        .status-item { display: flex; justify-content: space-between; padding: 12px; background: #0f172a; border-radius: 8px; margin-bottom: 10px; }
-        .value { font-size: 24px; font-weight: bold; color: #60a5fa; }
+        .card { background: #3a3a3a; color: #e0e0e0; border-radius: 6px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); border: none; }
+        .card h3 { color: #f0f0f0; margin-bottom: 5px; border-bottom: 1px solid #666; padding-bottom: 10px; font-size: 16px; }
+        .card .subtitle { color: #999999; font-size: 11px; margin-bottom: 15px; font-style: italic; }
+        .status-item { display: flex; justify-content: space-between; padding: 12px; background: #2a2a2a; border-radius: 6px; margin-bottom: 10px; }
+        .value { font-size: 24px; font-weight: bold; color: #cccccc; }
         .status-success   { color: #22c55e; font-weight: bold; }
         .status-failure   { color: #ef4444; font-weight: bold; }
         .status-failed    { color: #ef4444; font-weight: bold; }
-        .status-running   { color: #3b82f6; font-weight: bold; }
+        .status-running   { color: #aaaaaa; font-weight: bold; }
         .status-cancelled  { color: #f59e0b; font-weight: bold; }
         .status-no-builds  { color: #818cf8; font-weight: bold; }
         .server-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-        .server-card { background: #0f172a; padding: 15px; border-radius: 10px; text-align: center; border: 2px solid #334155; transition: all 0.3s; }
-        .server-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
-        .server-card h4 { color: #60a5fa; margin-bottom: 10px; font-size: 13px; }
-        .metric { display: flex; justify-content: space-between; margin: 6px 0; font-size: 12px; color: #cbd5e1; }
-        .metric b { color: #94a3b8; }
+        .server-card { background: #2a2a2a; padding: 15px; border-radius: 6px; text-align: center; border: 2px solid #555; transition: all 0.3s; }
+        .server-card:hover { border-color: #aaaaaa; transform: translateY(-2px); }
+        .server-card h4 { color: #cccccc; margin-bottom: 10px; font-size: 13px; }
+        .metric { display: flex; justify-content: space-between; margin: 6px 0; font-size: 12px; color: #cccccc; }
+        .metric b { color: #999999; }
         .metric.high { color: #ef4444; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #334155; }
-        th { background: #0f172a; color: #60a5fa; font-weight: 600; }
-        td { color: #cbd5e1; }
-        .btn { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; margin: 5px; text-decoration: none; display: inline-block; transition: all 0.3s; }
-        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        th { background: #2a2a2a; color: #e0e0e0; font-weight: 600; }
+        td { color: #cccccc; }
+        .btn { background: #555555; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; margin: 5px; text-decoration: none; display: inline-block; transition: all 0.3s; }
+        .btn:hover { background: #666666; transform: translateY(-1px); }
         .btn-home { background: #64748b; }
-        .btn-home:hover { background: #475569; }
-        .chart-container { height: 200px; background: #0f172a; border-radius: 10px; padding: 15px; margin-top: 10px; position: relative; }
-        .tb-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
-        .tb-btn:hover { border-color: #60a5fa; color: #e2e8f0; }
-        .tb-btn.active { background: #1e3a5f; border-color: #60a5fa; color: #60a5fa; }
-        .tb-btn.active-running   { background: #1e3a5f; border-color: #3b82f6; color: #3b82f6; }
-        .tb-btn.active-success   { background: #052e16; border-color: #22c55e; color: #22c55e; }
-        .tb-btn.active-cancelled { background: #451a03; border-color: #f59e0b; color: #f59e0b; }
-        .tb-btn.active-failure   { background: #3b0000; border-color: #ef4444; color: #ef4444; }
-        .tb-btn.active-no-builds { background: #1a1a3e; border-color: #818cf8; color: #818cf8; }
-        .tb-clear-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
-        .tb-clear-btn:hover { border-color: #60a5fa; color: #e2e8f0; }
+        .btn-home:hover { background: #555555; }
+        .chart-container { height: 200px; background: #2a2a2a; border-radius: 6px; padding: 15px; margin-top: 10px; position: relative; }
+        .tb-btn { background: #383838; color: #999999; border: 1px solid #555; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+        .tb-btn:hover { border-color: #cccccc; color: #e0e0e0; }
+        .tb-btn.active { background: #3a3a3a; border-color: #cccccc; color: #cccccc; }
+        .tb-btn.active-running   { background: #3a3a3a; border-color: #888; color: #ccc; }
+        .tb-btn.active-success   { background: #1a3a2a; border-color: #4a8a5a; color: #7abf8a; }
+        .tb-btn.active-cancelled { background: #3a2a0a; border-color: #8a6a1a; color: #c49a3a; }
+        .tb-btn.active-failure   { background: #3a1a1a; border-color: #8a3a3a; color: #c06060; }
+        .tb-btn.active-no-builds { background: #1a1a3a; border-color: #4a4a8a; color: #7a7ac0; }
+        .tb-clear-btn { background: #383838; color: #999999; border: 1px solid #555; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+        .tb-clear-btn:hover { border-color: #cccccc; color: #e0e0e0; }
     </style>
 </head>
 <body>
+    <div style="background:#1a1a1a;min-height:100vh;padding:30px;">
     <div class="container">
         <div class="header">
             <div class="header-left">
                 <a href="http://localhost:5000" class="btn btn-home">← Home</a>
                 <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-2px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">Logout</button>
-                <h1>SDOS Dashboard</h1>
+                <h1 style="color:white;">SDOS Dashboard</h1>
             </div>
         </div>
         <div style="margin-bottom: 20px;">
@@ -362,14 +367,14 @@ DASHBOARD_TEMPLATE = """
                     `<td><b>${job.name}</b></td>` +
                     `<td>${job.lastBuild !== 'N/A' ? '#' + job.lastBuild : 'N/A'}</td>` +
                     `<td><span class="status-${job.status.toLowerCase().replace(/ /g, '-')}">${job.status}</span></td>` +
-                    `<td><a href="${job.url}" target="_blank" style="color:#60a5fa">View</a></td>`;
+                    `<td><a href="${job.url}" target="_blank" style="color:#aaaaaa">View</a></td>`;
             });
         }
 
         function drawChart(elementId, data, color) {
             const svg = document.getElementById(elementId);
             if (!data || data.length < 2) {
-                svg.innerHTML = '<text x="150" y="90" text-anchor="middle" fill="#64748b" font-size="12">Collecting data...</text>';
+                svg.innerHTML = '<text x="150" y="90" text-anchor="middle" fill="#999999" font-size="12">Collecting data...</text>';
                 return;
             }
             const width=300,height=180,pL=35,pR=10,pT=30,pB=30;
@@ -383,16 +388,16 @@ DASHBOARD_TEMPLATE = """
             let labels='',grid='';
             for(let i=0;i<=4;i++){
                 const v=dMin+(dR*i/4); const y=pT+gH-(i/4)*gH;
-                labels+=`<text x="${pL-5}" y="${y+4}" text-anchor="end" font-size="10" fill="#64748b">${v.toFixed(1)}%</text>`;
-                grid+=`<line x1="${pL}" y1="${y}" x2="${pL+gW}" y2="${y}" stroke="#334155" stroke-width="1" stroke-dasharray="3,3"/>`;
+                labels+=`<text x="${pL-5}" y="${y+4}" text-anchor="end" font-size="10" fill="#999999">${v.toFixed(1)}%</text>`;
+                grid+=`<line x1="${pL}" y1="${y}" x2="${pL+gW}" y2="${y}" stroke="#555555" stroke-width="1" stroke-dasharray="3,3"/>`;
             }
             svg.innerHTML=grid+
                 `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="3"/>` +
-                `<line x1="${pL}" y1="${pT+gH}" x2="${pL+gW}" y2="${pT+gH}" stroke="#475569" stroke-width="2"/>` +
-                `<line x1="${pL}" y1="${pT}" x2="${pL}" y2="${pT+gH}" stroke="#475569" stroke-width="2"/>` +
+                `<line x1="${pL}" y1="${pT+gH}" x2="${pL+gW}" y2="${pT+gH}" stroke="#666666" stroke-width="2"/>` +
+                `<line x1="${pL}" y1="${pT}" x2="${pL}" y2="${pT+gH}" stroke="#666666" stroke-width="2"/>` +
                 labels+
-                `<text x="${pL+gW/2}" y="${height-5}" text-anchor="middle" font-size="10" fill="#94a3b8">Data Points (last 20 readings)</text>`+
-                `<text x="10" y="15" text-anchor="start" font-size="9" fill="#94a3b8">Usage (%)</text>`+
+                `<text x="${pL+gW/2}" y="${height-5}" text-anchor="middle" font-size="10" fill="#999999">Data Points (last 20 readings)</text>`+
+                `<text x="10" y="15" text-anchor="start" font-size="9" fill="#999999">Usage (%)</text>`+
                 `<text x="${pL+gW/2}" y="18" text-anchor="middle" font-size="13" fill="${color}" font-weight="bold">Current: ${data[data.length-1].toFixed(1)}%</text>`;
         }
 
@@ -418,9 +423,9 @@ DASHBOARD_TEMPLATE = """
                         const latV  = s.latency != null ? s.latency         + 'ms' : 'N/A';
                         grid.innerHTML +=
                             `<div class="server-card"><h4>${s.name}</h4>` +
-                            `<div class="metric ${s.cpu>70?'high':''}"><b>CPU:</b> <span>${cpuV}</span></div>` +
-                            `<div class="metric ${s.ram>80?'high':''}"><b>RAM:</b> <span>${ramV}</span></div>` +
-                            `<div class="metric ${s.disk>85?'high':''}"><b>DISK:</b> <span>${diskV}</span></div>` +
+                            `<div class="metric ${s.cpu>70?'high':''}"><b>vCPU %:</b> <span>${cpuV}</span></div>` +
+                            `<div class="metric ${s.ram>80?'high':''}"><b>RAM %:</b> <span>${ramV}</span></div>` +
+                            `<div class="metric ${s.disk>85?'high':''}"><b>Disk Usage:</b> <span>${diskV}</span></div>` +
                             `<div class="metric"><b>PING:</b> <span>${latV}</span></div>` +
                             `<div class="metric"><b>STATUS:</b> <span class="status-success">${s.status}</span></div></div>`;
                     });

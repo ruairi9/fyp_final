@@ -41,112 +41,131 @@ HOME_TEMPLATE = '''
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            color: #e2e8f0;
+            background: #f0f0f0;
+            color: #222;
             min-height: 100vh;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container { max-width: 1400px; width: 100%; text-align: center; }
-        .hero {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            padding: 60px 40px;
-            border-radius: 20px;
-            margin-bottom: 40px;
-            box-shadow: 0 20px 60px rgba(59, 130, 246, 0.4);
-        }
-        .hero h1 { font-size: 48px; margin-bottom: 15px; }
-        .hero p { font-size: 20px; opacity: 0.9; }
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 25px;
-        }
-        .card {
-            background: #1e293b;
-            padding: 35px 25px;
-            border-radius: 15px;
-            border: 2px solid #334155;
-            transition: all 0.3s;
-            cursor: pointer;
-            text-decoration: none;
-            color: inherit;
-            display: block;
-        }
-        .card:hover {
-            transform: translateY(-10px);
-            border-color: #3b82f6;
-            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.3);
-        }
-        .card-icon { font-size: 48px; margin-bottom: 20px; }
-        .card h2 { color: #60a5fa; margin-bottom: 15px; font-size: 22px; }
-        .card p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
-        .status-badge {
-            display: inline-block;
-            background: #22c55e;
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 12px;
-            margin-top: 15px;
+            flex-direction: column;
         }
 
-        /* ── Login wall ─────────────────────────────── */
+        /* Header */
+        .header {
+            background: #3a3a3a;
+            color: white;
+            padding: 12px 40px;
+            border-bottom: 4px solid #cc0000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header p {
+            font-size: 16px;
+            color: #aaa;
+            font-style: italic;
+        }
+        .header-top { display: flex; align-items: center; }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            padding: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Dashboard grid */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-top: 10px;
+        }
+
+        .card {
+            background: #4a4a4a;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            padding: 45px 30px;
+            font-size: 18px;
+            font-weight: 500;
+            text-align: center;
+            cursor: pointer;
+            text-decoration: none;
+            display: block;
+            transition: background 0.2s, transform 0.1s;
+            letter-spacing: 0.5px;
+        }
+        .card:hover {
+            background: #4a4a4a;
+            transform: translateY(-2px);
+        }
+        .card p {
+            font-size: 12px;
+            color: #cccccc;
+            margin-top: 8px;
+            font-weight: 400;
+        }
+
+        /* Login wall */
         #login-wall {
             max-width: 440px;
-            margin: 0 auto;
-            background: #1e293b;
-            border: 2px solid #334155;
-            border-radius: 20px;
+            margin: 40px auto;
+            background: #383838;
+            border: 1px solid #555;
+            border-radius: 8px;
             padding: 40px;
-            text-align: left;
         }
         #login-wall h2 {
-            color: #60a5fa;
+            color: #ffffff;
             font-size: 22px;
             margin-bottom: 8px;
             text-align: center;
         }
         #login-wall p {
-            color: #94a3b8;
+            color: #aaaaaa;
             font-size: 13px;
             text-align: center;
             margin-bottom: 28px;
         }
         .lw-label {
             display: block;
-            color: #94a3b8;
+            color: #cccccc;
             font-size: 13px;
             margin-bottom: 6px;
         }
         .lw-input {
             width: 100%;
-            background: #0f172a;
-            border: 1px solid #475569;
-            border-radius: 8px;
+            background: #2d2d2d;
+            border: 1px solid #666;
+            border-radius: 6px;
             padding: 12px;
-            color: #e2e8f0;
+            color: #e0e0e0;
             font-size: 14px;
             margin-bottom: 18px;
         }
-        .lw-input:focus { outline: none; border-color: #60a5fa; }
+        .lw-input:focus { outline: none; border-color: #888; }
         .lw-btn {
             width: 100%;
-            background: #3b82f6;
+            background: #4a4a4a;
             color: white;
             border: none;
             padding: 13px;
-            border-radius: 8px;
+            border-radius: 6px;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             transition: background 0.2s;
         }
-        .lw-btn:hover { background: #2563eb; }
+        .lw-btn:hover { background: #4a4a4a; }
         #lw-error {
-            color: #ef4444;
+            color: #cc0000;
             font-size: 13px;
             margin-top: 14px;
             text-align: center;
@@ -155,96 +174,104 @@ HOME_TEMPLATE = '''
         #lw-spinner {
             display: none;
             text-align: center;
-            color: #60a5fa;
+            color: #888;
             font-size: 13px;
             margin-top: 12px;
         }
 
-        /* ── Logout bar (shown when logged in) ─────── */
-        #user-bar {
-            display: none;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 14px;
-            margin-bottom: 24px;
-        }
-        #user-bar span { color: #94a3b8; font-size: 14px; }
+        /* Logout button */
         #logout-btn {
-            background: #ef4444;
+            background: #cc0000;
             color: white;
             border: none;
             padding: 9px 20px;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 13px;
             font-weight: 600;
-            transition: all 0.3s;
+            transition: background 0.2s;
         }
-        #logout-btn:hover { background: #dc2626; transform: translateY(-2px); box-shadow: 0 4px 15px rgba(239,68,68,0.5); }
+        #logout-btn:hover { background: #aa0000; }
+
+        /* Footer */
+        .footer {
+            background: #3a3a3a;
+            color: #aaa;
+            text-align: center;
+            padding: 20px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+<div style="background:#1a1a1a;min-height:100vh;padding:30px 0;">
+<div style="background:#2d2d2d;max-width:1200px;margin:0 auto;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.4);">
 
-        <!-- ── User bar (only visible when logged in) ── -->
-        <div id="user-bar">
-            <span id="user-greeting"></span>
-            <button id="logout-btn" onclick="doLogout()">Logout</button>
+    <div class="header">
+        <div style="width:100px;"></div>
+        <div style="flex:1;text-align:center;">
+            <h1 style="margin:0;">SDOS Operating System</h1>
+            <p style="margin:4px 0 0 0;font-size:14px;color:#cccccc;font-style:italic;">Kubernetes Cluster Management and Monitoring Platform</p>
         </div>
-
-        <div class="hero">
-            <h1>Software SDOS Operating System</h1>
-            <p>Kubernetes Cluster Management &amp; Monitoring Platform</p>
+        <div style="width:100px;display:flex;justify-content:flex-end;">
+            <button id="logout-btn" onclick="doLogout()" style="display:none;">Logout</button>
         </div>
+    </div>
 
-        <!-- ── Login wall (shown when NOT logged in) ── -->
+    <div class="main">
+
+        <!-- Login wall -->
         <div id="login-wall">
-            <h2>🔐 Login to Website</h2>
+            <h2>Login to SDOS</h2>
             <p>Enter your credentials to access the SDOS dashboards</p>
 
             <label class="lw-label">Username</label>
-            <input class="lw-input" type="text" id="lw-username" value="admin" autocomplete="username">
+            <input class="lw-input" type="text" id="lw-username" value="" autocomplete="username">
 
             <label class="lw-label">Password</label>
             <input class="lw-input" type="password" id="lw-password" placeholder="Enter password"
                    autocomplete="current-password"
                    onkeydown="if(event.key===\'Enter\') doLogin()">
 
+            <label class="lw-label">Role</label>
+            <select class="lw-input" id="lw-role" style="cursor:pointer;">
+                <option value="" disabled selected>Select Role</option>
+                <option value="Administrator">Administrator</option>
+                <option value="Developer">Developer</option>
+                <option value="Tester">Tester</option>
+            </select>
+
             <button class="lw-btn" onclick="doLogin()">Login</button>
             <div id="lw-error"></div>
-            <div id="lw-spinner">Logging in all nodes — this may take ~30 seconds...</div>
+            <div id="lw-spinner">Logging in — this may take up to 30 seconds...</div>
         </div>
 
-        <!-- ── Dashboard cards (shown when logged in) ── -->
+        <!-- Dashboard cards -->
         <div id="dashboard-cards" style="display:none;">
             <div class="cards">
                 <a href="http://localhost:8080" class="card">
-                    <div class="card-icon">📊</div>
-                    <h2>Cluster Dashboard</h2>
-                    <p>Real-time cluster metrics, server status, Jenkins pipelines, and resource usage graphs</p>
-                    <span class="status-badge">Active</span>
+                    Cluster Dashboard
+                    <p>Real-time cluster metrics, server status and resource usage</p>
                 </a>
                 <a href="http://localhost:9000" class="card">
-                    <div class="card-icon">🖥️</div>
-                    <h2>Server Dashboard</h2>
-                    <p>Individual server monitoring with VM statistics, resource utilization, and performance metrics</p>
-                    <span class="status-badge">Active</span>
+                    Server Dashboard
+                    <p>VM statistics, resource utilization and performance metrics</p>
                 </a>
                 <a href="http://localhost:7000" class="card">
-                    <div class="card-icon">🚀</div>
-                    <h2>Pipeline Dashboard</h2>
-                    <p>Jenkins CI/CD pipeline monitoring with build status, execution times, and stage tracking</p>
-                    <span class="status-badge">Active</span>
+                    Pipeline Dashboard
+                    <p>Jenkins CI/CD pipeline monitoring and build status</p>
                 </a>
                 <a href="http://localhost:6001" class="card">
-                    <div class="card-icon">💻</div>
-                    <h2>Developer Workspace</h2>
-                    <p>Code editor with Monaco (VS Code) for editing microservices, pipelines, and configurations</p>
-                    <span class="status-badge">Active</span>
+                    Developer Workspace
+                    <p>Code editor for microservices, pipelines and configurations</p>
                 </a>
             </div>
         </div>
 
+    </div>
+
+    <div class="footer">
+        SDOS Operating System — Kubernetes Cluster Management Platform
     </div>
 
     <script>
@@ -265,28 +292,26 @@ HOME_TEMPLATE = '''
         function showLoginWall() {
             document.getElementById('login-wall').style.display      = 'block';
             document.getElementById('dashboard-cards').style.display = 'none';
-            document.getElementById('user-bar').style.display        = 'none';
+            document.getElementById('logout-btn').style.display      = 'none';
         }
 
         function showDashboard(username) {
             document.getElementById('login-wall').style.display      = 'none';
             document.getElementById('dashboard-cards').style.display = 'block';
-            document.getElementById('user-bar').style.display        = 'flex';
-            if (username) {
-                document.getElementById('user-greeting').textContent = 'Logged in as ' + username;
-            }
+            document.getElementById('logout-btn').style.display      = 'inline-block';
         }
 
         async function doLogin() {
             const username = document.getElementById('lw-username').value.trim();
             const password = document.getElementById('lw-password').value.trim();
+            const role     = document.getElementById('lw-role').value.trim();
             const errEl    = document.getElementById('lw-error');
             const spinner  = document.getElementById('lw-spinner');
 
             errEl.textContent = '';
 
-            if (!username || !password) {
-                errEl.textContent = 'Please enter username and password.';
+            if (!username || !password || !role) {
+                errEl.textContent = 'All fields are required.';
                 return;
             }
 
@@ -297,15 +322,14 @@ HOME_TEMPLATE = '''
                 const res  = await fetch('/api/registry-login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password, role })
                 });
                 const data = await res.json();
 
-                const allOk = data.results && data.results.every(r => r.success);
-                if (allOk) {
+                if (data.all_ok) {
                     showDashboard(username);
                 } else {
-                    errEl.textContent = 'Incorrect password — please try again.';
+                    errEl.textContent = data.error || 'Login failed — please try again.';
                 }
             } catch(e) {
                 errEl.textContent = 'Error: ' + e.message;
@@ -320,6 +344,7 @@ HOME_TEMPLATE = '''
             window.location.href = 'http://localhost:5000';
         }
     </script>
+</div></div>
 </body>
 </html>
 '''
@@ -346,15 +371,31 @@ def registry_status():
         pass
     return jsonify(result)
 
+# Role mapping
+USER_ROLES = {
+    'admin':     'Administrator',
+    'ruairi':    'Administrator',
+    'developer': 'Developer',
+    'tester':    'Tester',
+}
+
 @app.route('/api/registry-login', methods=['POST'])
 def registry_login():
     data = request.json
     username = data.get('username', '').strip()
     password = data.get('password', '').strip()
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Missing credentials'})
+    role     = data.get('role', '').strip()
 
-    REGISTRY   = "192.168.121.50:30500"
+    if not username or not password or not role:
+        return jsonify({'results': [], 'all_ok': False, 'error': 'All fields are required'})
+
+    if username not in USER_ROLES:
+        return jsonify({'results': [], 'all_ok': False, 'error': 'Invalid username'})
+
+    if USER_ROLES[username] != role:
+        return jsonify({'results': [], 'all_ok': False, 'error': f'You are not authorised for the {role} role'})
+
+    REGISTRY    = "192.168.121.50:30500"
     VAGRANT_DIR = os.path.expanduser('~/fyp-cluster')
 
     nodes = [
@@ -388,8 +429,8 @@ def registry_login():
 
     all_ok = all(r['success'] for r in results)
     if all_ok:
-        set_session({'logged_in': True, 'username': username})
-    return jsonify({'results': results, 'all_ok': all_ok})
+        set_session({'logged_in': True, 'username': username, 'role': role})
+    return jsonify({'results': results, 'all_ok': all_ok, 'role': role})
 
 @app.route('/api/check-session')
 def check_session():

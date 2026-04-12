@@ -1,0 +1,10 @@
+PASS: Stress started on control-plane
+PASS: Stress started on worker-dev
+PASS: Stress started on worker-prod
+PASS: Stress started on worker-cicd
+PASS: Stress started on worker-monitoring
+
+=== DURING STRESS — HOST ===
+RAM During Stress: 28.9%
+CPU During Stress: 4.8%
+Stress phase complete

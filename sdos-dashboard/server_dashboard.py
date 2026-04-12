@@ -321,54 +321,56 @@ SERVER_DASHBOARD_TEMPLATE = '''
     <meta http-equiv="Cache-Control" content="no-cache">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a1a; color: #ffffff; padding: 20px; }
         .container { max-width: 1600px; margin: 0 auto; }
         .header {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            background: #2d2d2d;
             padding: 20px 30px; border-radius: 15px; margin-bottom: 25px;
             display: flex; align-items: center;
-            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+            box-shadow: none; border-bottom: 4px solid #cc0000;
         }
-        .header h1 { font-size: 32px; }
+        .header h1 { font-size: 32px; color: #ffffff; }
         .header-left { display: flex; align-items: center; gap: 20px; }
-        .btn { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; transition: all 0.3s; }
-        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn { background: #555555; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; transition: all 0.3s; }
+        .btn:hover { background: #666666; transform: translateY(-1px); }
         .btn-home { background: #64748b; }
-        .btn-home:hover { background: #475569; }
+        .btn-home:hover { background: #555555; }
         .main-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
         .sidebar { display: flex; flex-direction: column; gap: 20px; }
-        .sidebar-card { background: #1e293b; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #334155; }
-        .sidebar-card h3 { color: #60a5fa; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 14px; }
-        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #334155; }
+        .sidebar-card { background: #383838; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #555; }
+        .sidebar-card h3 { color: #ffffff; margin-bottom: 15px; border-bottom: 2px solid #888; padding-bottom: 10px; font-size: 14px; }
+        .stat-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #888; }
         .stat-row:last-child { border-bottom: none; }
-        .stat-label { color: #94a3b8; }
-        .stat-value { color: #e2e8f0; font-weight: 500; }
-        .content-card { background: #1e293b; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #334155; }
-        .content-card h3 { color: #60a5fa; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; font-size: 16px; }
+        .stat-label { color: #ffffff; }
+        .stat-value { color: #ffffff; font-weight: 500; }
+        .content-card { background: #383838; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid #555; }
+        .content-card h3 { color: #ffffff; margin-bottom: 15px; border-bottom: 2px solid #888; padding-bottom: 10px; font-size: 16px; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th { background: #0f172a; color: #60a5fa; padding: 12px; text-align: left; font-size: 13px; font-weight: 600; }
-        td { padding: 12px; border-bottom: 1px solid #334155; font-size: 13px; color: #cbd5e1; }
-        tr:hover { background: #334155; }
-        .vm-name { color: #3b82f6; cursor: pointer; }
+        th { background: transparent; color: #ffffff; padding: 12px; text-align: left; font-size: 13px; font-weight: 600; border-bottom: 2px solid #888; }
+        td { padding: 12px; border-bottom: 1px solid #888; font-size: 13px; color: #ffffff; }
+        tr:hover { background: #4a4a4a; }
+        .vm-name { color: #ffffff; cursor: pointer; }
         .vm-name:hover { text-decoration: underline; }
-        .selected-section { background: #334155; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 20px; color: #60a5fa; }
+        .selected-section { padding: 12px 0; font-weight: bold; margin-bottom: 20px; color: #ffffff; border-bottom: 2px solid #555; }
         .charts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-        .chart-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 15px; }
-        .chart-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; color: #94a3b8; }
+        .chart-box { background: #2d2d2d; border: 1px solid #555; border-radius: 8px; padding: 15px; }
+        .chart-title { font-weight: 600; font-size: 13px; margin-bottom: 10px; color: #ffffff; }
         .chart-svg { width: 100%; height: 140px; }
-        .info-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; justify-content: center; }
-        .info-row { display: flex; justify-content: space-between; padding: 10px 0; font-size: 14px; border-bottom: 1px solid #334155; }
+        .info-box { background: #2d2d2d; border: 1px solid #555; border-radius: 8px; padding: 20px; display: flex; flex-direction: column; justify-content: center; }
+        .info-row { display: flex; justify-content: space-between; padding: 10px 0; font-size: 14px; border-bottom: 1px solid #4a4a4a; }
         .info-row:last-child { border-bottom: none; }
-        .real-data { color: #22c55e; }
+        .real-data { color: #ffffff; }
     </style>
 </head>
 <body>
+<div style="background:#1a1a1a;min-height:100vh;padding:30px 0;">
+<div style="background:#2d2d2d;max-width:1500px;margin:0 auto;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.4);">
     <div class="container">
         <div class="header">
             <div class="header-left">
                 <a href="http://localhost:5000" class="btn btn-home">← Home</a>
                 <button onclick="logout()" style="background:#ef4444;color:white;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.3s;" onmouseover="this.style.background=\'#dc2626\';this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.background=\'#ef4444\';this.style.transform=\'translateY(0)\'">Logout</button>
-                <h1>Server Dashboard</h1>
+                <h1 style="color:white;" style="color:white;">Server Dashboard</h1>
             </div>
         </div>
 
@@ -410,7 +412,7 @@ SERVER_DASHBOARD_TEMPLATE = '''
                     </thead>
                     <tbody><tr><td colspan="6">Loading...</td></tr></tbody>
                 </table>
-                <div class="selected-section" id="selected-vm-label">Selected VM: -</div>
+                <div id="selected-vm-label" style="padding: 12px 0; margin-bottom: 15px; font-size: 16px; font-weight: 600; color: #ffffff; border-bottom: 2px solid #888;">Selected VM: -</div>
                 <div class="charts-grid">
                     <div class="chart-box"><div class="chart-title">CPU Utilisation</div><svg class="chart-svg" id="cpu-chart"></svg></div>
                     <div class="chart-box"><div class="chart-title">Memory Usage</div><svg class="chart-svg" id="memory-chart"></svg></div>
@@ -418,8 +420,8 @@ SERVER_DASHBOARD_TEMPLATE = '''
                     <div class="chart-box"><div class="chart-title">Disk Latency</div><svg class="chart-svg" id="latency-chart"></svg></div>
                     <div class="chart-box"><div class="chart-title">Network Traffic</div><svg class="chart-svg" id="network-chart"></svg></div>
                     <div class="info-box">
-                        <div class="info-row"><span style="font-weight:bold;color:#60a5fa;">PODs</span><span id="pod-count" class="real-data">-</span></div>
-                        <div class="info-row"><span style="font-weight:bold;color:#60a5fa;">CLUSTERS</span><span id="cluster-count" class="real-data">-</span></div>
+                        <div class="info-row"><span style="font-weight:bold;color:#ffffff;">PODs</span><span id="pod-count" class="real-data">-</span></div>
+                        <div class="info-row"><span style="font-weight:bold;color:#ffffff;">CLUSTERS</span><span id="cluster-count" class="real-data">-</span></div>
                     </div>
                 </div>
             </div>
@@ -506,11 +508,11 @@ SERVER_DASHBOARD_TEMPLATE = '''
                     row.style.cursor = 'pointer';
                     row.innerHTML =
                         '<td><span class="vm-name">' + vm.name + '</span></td>' +
-                        '<td style="color:#22c55e;">' + vm.cpu + '%</td>' +
-                        '<td style="color:#22c55e;">' + vm.ram + '%</td>' +
-                        '<td style="color:#22c55e;">' + vm.disk + '</td>' +
-                        '<td style="color:#22c55e;">' + vm.steal_time + '</td>' +
-                        '<td style="color:#22c55e;">' + vm.disk_io + '</td>';
+                        '<td style="color:#ffffff;">' + vm.cpu + '%</td>' +
+                        '<td style="color:#ffffff;">' + vm.ram + '%</td>' +
+                        '<td style="color:#ffffff;">' + vm.disk + '</td>' +
+                        '<td style="color:#ffffff;">' + vm.steal_time + '</td>' +
+                        '<td style="color:#ffffff;">' + vm.disk_io + '</td>';
                     row.addEventListener('click', () => selectVM(vm.name, vm));
                     if (!selectedVM && data.vms.indexOf(vm) === 0) {
                         selectVM(vm.name, vm);
@@ -543,7 +545,9 @@ SERVER_DASHBOARD_TEMPLATE = '''
         fetchData();
         setInterval(fetchData, 5000);
     </script>
-</body>
+    </div>
+    </div>
+</div></div></body>
 </html>
 '''
 

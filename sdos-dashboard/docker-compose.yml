@@ -1,12 +1,89 @@
 version: '3.8'
 
 services:
-  sdos-dashboard:
-    build: .
+  home:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdos-home
+    command: python3 home.py
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./:/app
+      - ../k3s.yaml:/home/user/fyp-cluster/k3s.yaml:ro
+      - ~/.vagrant.d:/root/.vagrant.d:ro
+      - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
+      - ../:/home/user/fyp-cluster
+    environment:
+      - KUBECONFIG=/home/user/fyp-cluster/k3s.yaml
+    network_mode: host
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: sdos-dashboard
+    command: python3 dashboard.py
     ports:
       - "8080:8080"
     volumes:
-      - ../k3s.yaml:/root/fyp-cluster/k3s.yaml:ro
+      - ./:/app
+      - ../k3s.yaml:/home/user/fyp-cluster/k3s.yaml:ro
+      - ../:/home/user/fyp-cluster
+    environment:
+      - KUBECONFIG=/home/user/fyp-cluster/k3s.yaml
+    network_mode: host
+    restart: unless-stopped
+
+  server-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdos-server-dashboard
+    command: python3 server_dashboard.py
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./:/app
+      - ../k3s.yaml:/home/user/fyp-cluster/k3s.yaml:ro
+      - ../:/home/user/fyp-cluster
+    environment:
+      - KUBECONFIG=/home/user/fyp-cluster/k3s.yaml
+    network_mode: host
+    restart: unless-stopped
+
+  pipeline-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdos-pipeline-dashboard
+    command: python3 pipeline_dashboard.py
+    ports:
+      - "7000:7000"
+    volumes:
+      - ./:/app
+      - ../k3s.yaml:/home/user/fyp-cluster/k3s.yaml:ro
+      - ../:/home/user/fyp-cluster
+    environment:
+      - KUBECONFIG=/home/user/fyp-cluster/k3s.yaml
+    network_mode: host
+    restart: unless-stopped
+
+  developer-workspace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdos-developer-workspace
+    command: python3 developer_workspace.py
+    ports:
+      - "6001:6001"
+    volumes:
+      - ./:/app
+      - ../k3s.yaml:/home/user/fyp-cluster/k3s.yaml:ro
+      - ../:/home/user/fyp-cluster
+    environment:
+      - KUBECONFIG=/home/user/fyp-cluster/k3s.yaml
     network_mode: host
     restart: unless-stopped
