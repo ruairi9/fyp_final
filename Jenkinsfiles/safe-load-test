@@ -17,7 +17,7 @@ pipeline {
             steps {
                 echo '============================================'
                 echo ' SDOS SAFE LOAD TEST — All 5 VMs'
-                echo ' Resource cap: 50% CPU + 50% RAM'
+                echo ' Resource cap: 70% CPU + 70% RAM'
                 echo '============================================'
                 sh '''
                     echo "Safe Load Test Started: $(date)" > $REPORT_FILE
@@ -72,14 +72,14 @@ pipeline {
                     wait
 
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== CPU STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== CPU STRESS (70% cap) ===" >> $WORKSPACE/$REPORT_FILE
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh $VM -c "
                             CPUS=\$(nproc)
                             HALF=\$(( CPUS / 2 ))
                             [ \$HALF -lt 1 ] && HALF=1
-                            nohup stress-ng --cpu \$HALF --cpu-load 50 --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
+                            nohup stress-ng --cpu \$HALF --cpu-load 70 --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
                         " 2>/dev/null &
                     done
                     wait
@@ -114,11 +114,11 @@ pipeline {
                 sh '''
                     cd $VAGRANT_DIR
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== RAM STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== RAM STRESS (70% cap) ===" >> $WORKSPACE/$REPORT_FILE
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh $VM -c "
-                            nohup stress-ng --vm 1 --vm-bytes 50% --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
+                            nohup stress-ng --vm 1 --vm-bytes 70% --timeout ${TEST_DURATION}s > /tmp/stress.log 2>&1 &
                         " 2>/dev/null &
                     done
                     wait
@@ -152,7 +152,7 @@ pipeline {
                 sh '''
                     cd $VAGRANT_DIR
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== COMBINED STRESS (50% cap) ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== COMBINED STRESS (70% cap) ===" >> $WORKSPACE/$REPORT_FILE
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh $VM -c "
@@ -160,8 +160,8 @@ pipeline {
                             HALF=\$(( CPUS / 2 ))
                             [ \$HALF -lt 1 ] && HALF=1
                             nohup stress-ng \
-                                --cpu \$HALF --cpu-load 50 \
-                                --vm 1 --vm-bytes 40% \
+                                --cpu \$HALF --cpu-load 70 \
+                                --vm 1 --vm-bytes 60% \
                                 --hdd 1 --hdd-bytes 128M \
                                 --timeout ${TEST_DURATION}s \
                                 > /tmp/stress.log 2>&1 &
