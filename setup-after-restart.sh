@@ -42,3 +42,16 @@ echo "║  Home:      http://localhost:5000                        ║"
 echo "║  Jenkins:   http://192.168.121.40:32080                  ║"
 echo "║  Grafana:   http://192.168.121.50:32030                  ║"
 echo "╚══════════════════════════════════════════════════════════╝"
+
+# Start Jenkins agent
+echo "Starting Jenkins host-agent..."
+SECRET=$(curl -s "http://192.168.121.40:32080/computer/host-agent/slave-agent.jnlp" \
+--user "admin:119841289d2010c9d2b89611641fd17bef" | grep -o 'secret>[^<]*' | cut -d'>' -f2)
+cd ~/jenkins-agent
+java -jar remoting.jar \
+  -url http://192.168.121.40:32080 \
+  -secret $SECRET \
+  -name host-agent \
+  -workDir "/home/ruairi/jenkins-agent" \
+  -webSocket > ~/jenkins-agent/agent.log 2>&1 &
+echo "Jenkins agent started!"

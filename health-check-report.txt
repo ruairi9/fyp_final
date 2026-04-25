@@ -25,3 +25,12 @@ PASS: worker-cicd reachable
 PASS: worker-monitoring reachable
 
 VM Health: 5/5 reachable
+
+=== VM HEALTH ===
+PASS: control-plane reachable
+PASS: worker-dev reachable
+PASS: worker-prod reachable
+PASS: worker-cicd reachable
+PASS: worker-monitoring reachable
+
+VM Health: 5/5 reachable

@@ -429,18 +429,21 @@ SERVER_DASHBOARD_TEMPLATE = '''
     </div>
 
     <script>
-        const chartData = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
+        const allVMData = {};
         let selectedVM = null;
+        const chartData = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
 
         function drawChart(elementId, dataPoints, color, yLabel, maxY, loading = false) {
             const svg = document.getElementById(elementId);
             const width = svg.clientWidth || 300;
             const height = 140;
             const padding = 40;
-            if (loading || !dataPoints || dataPoints.length < 2) {
+            if (loading || !dataPoints || dataPoints.length < 1) {
                 svg.innerHTML = '<text x="' + (width/2) + '" y="' + (height/2) + '" fill="#94a3b8" font-size="14" text-anchor="middle">Collecting data...</text>';
                 return;
             }
+            if (dataPoints.length === 1) dataPoints = [dataPoints[0], dataPoints[0]];
+            if (maxY <= 0) maxY = 1;
             const numPoints = dataPoints.length;
             const points = dataPoints.map((v, i) => {
                 const x = padding + (i / Math.max(numPoints - 1, 1)) * (width - 2 * padding);
@@ -459,13 +462,29 @@ SERVER_DASHBOARD_TEMPLATE = '''
         function selectVM(vmName, vmData) {
             selectedVM = vmName;
             document.getElementById('selected-vm-label').textContent = 'Selected VM: ' + vmName;
-            chartData.cpu.push(vmData.cpu);
-            chartData.memory.push(vmData.ram);
-            chartData.diskIO.push(parseFloat(vmData.disk_io) || 0);
-            ['cpu','memory','diskIO','latency','network'].forEach(k => { if (chartData[k].length > 20) chartData[k].shift(); });
-            drawChart('cpu-chart',    chartData.cpu,    '#60a5fa', 'CPU %', 100, false);
-            drawChart('memory-chart', chartData.memory, '#22c55e', 'RAM %', 100, false);
-            drawChart('disk-chart',   chartData.diskIO, '#f59e0b', 'MB/s', Math.max(...chartData.diskIO, 1), false);
+
+            // Init storage for this VM if needed
+            if (!allVMData[vmName]) {
+                allVMData[vmName] = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
+            }
+
+            // Store new data point for this VM
+            if (vmData) {
+                allVMData[vmName].cpu.push(vmData.cpu);
+                allVMData[vmName].memory.push(vmData.ram);
+                allVMData[vmName].diskIO.push(parseFloat(vmData.disk_io) || 0);
+                ['cpu','memory','diskIO','latency','network'].forEach(k => {
+                    if (allVMData[vmName][k].length > 20) allVMData[vmName][k].shift();
+                });
+            }
+
+            // Draw charts using this VM's history
+            const d = allVMData[vmName];
+            drawChart('cpu-chart',    d.cpu,    '#60a5fa', 'CPU %', 100, false);
+            drawChart('memory-chart', d.memory, '#22c55e', 'RAM %', 100, false);
+            drawChart('disk-chart',   d.diskIO, '#f59e0b', 'MB/s', Math.max(...d.diskIO, 1), false);
+            drawChart('latency-chart', d.latency, '#8b5cf6', 'ms', Math.max(...d.latency, 10), false);
+            drawChart('network-chart', d.network, '#ef4444', 'MB/s', Math.max(...d.network, 1), false);
         }
 
         async function fetchData() {
@@ -504,8 +523,23 @@ SERVER_DASHBOARD_TEMPLATE = '''
                 const tbody = document.querySelector('#vm-table tbody');
                 tbody.innerHTML = '';
                 data.vms.forEach(vm => {
+                    // Store data for ALL VMs continuously
+                    if (!allVMData[vm.name]) {
+                        allVMData[vm.name] = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
+                    }
+                    allVMData[vm.name].cpu.push(vm.cpu);
+                    allVMData[vm.name].memory.push(vm.ram);
+                    allVMData[vm.name].diskIO.push(parseFloat(vm.disk_io) || 0);
+                    allVMData[vm.name].latency.push(data.host_stats.disk_latency || 0.1);
+                    allVMData[vm.name].network.push(data.host_stats.network_traffic || 0.0);
+                    ['cpu','memory','diskIO','latency','network'].forEach(k => {
+                        if (allVMData[vm.name][k].length > 20) allVMData[vm.name][k].shift();
+                    });
+
                     const row = tbody.insertRow();
                     row.style.cursor = 'pointer';
+                    const isSelected = vm.name === selectedVM;
+                    if (isSelected) row.style.background = '#4a4a4a';
                     row.innerHTML =
                         '<td><span class="vm-name">' + vm.name + '</span></td>' +
                         '<td style="color:#ffffff;">' + vm.cpu + '%</td>' +
@@ -513,11 +547,22 @@ SERVER_DASHBOARD_TEMPLATE = '''
                         '<td style="color:#ffffff;">' + vm.disk + '</td>' +
                         '<td style="color:#ffffff;">' + vm.steal_time + '</td>' +
                         '<td style="color:#ffffff;">' + vm.disk_io + '</td>';
-                    row.addEventListener('click', () => selectVM(vm.name, vm));
+                    row.addEventListener('click', () => selectVM(vm.name, null));
                     if (!selectedVM && data.vms.indexOf(vm) === 0) {
-                        selectVM(vm.name, vm);
+                        selectedVM = vm.name;
                     }
                 });
+
+                // Refresh charts for currently selected VM
+                if (selectedVM && allVMData[selectedVM]) {
+                    document.getElementById('selected-vm-label').textContent = 'Selected VM: ' + selectedVM;
+                    const d = allVMData[selectedVM];
+                    drawChart('cpu-chart',    d.cpu,    '#60a5fa', 'CPU %', 100, false);
+                    drawChart('memory-chart', d.memory, '#22c55e', 'RAM %', 100, false);
+                    drawChart('disk-chart',   d.diskIO, '#f59e0b', 'MB/s', Math.max(...d.diskIO, 1), false);
+                    drawChart('latency-chart', d.latency, '#8b5cf6', 'ms', Math.max(...d.latency, 10), false);
+                    drawChart('network-chart', d.network, '#ef4444', 'MB/s', Math.max(...d.network, 1), false);
+                }
             } catch (error) {
                 console.error('Error fetching data:', error);
             }
