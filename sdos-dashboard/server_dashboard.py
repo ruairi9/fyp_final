@@ -397,7 +397,6 @@ SERVER_DASHBOARD_TEMPLATE = '''
                     <div class="stat-row"><span class="stat-label">I/O Throughput</span><span class="stat-value real-data" id="disk-throughput">-</span></div>
                     <div class="stat-row"><span class="stat-label">Disk IOPS</span><span class="stat-value real-data" id="disk-iops">-</span></div>
                     <div class="stat-row"><span class="stat-label">Disk Latency</span><span class="stat-value real-data" id="disk-latency">-</span></div>
-                    <div class="stat-row"><span class="stat-label">I/O Waits</span><span class="stat-value real-data" id="io-wait">-</span></div>
                 </div>
             </div>
 
@@ -503,7 +502,7 @@ SERVER_DASHBOARD_TEMPLATE = '''
                 document.getElementById('disk-throughput').textContent = data.host_stats.disk_throughput + ' MB/s';
                 document.getElementById('disk-iops').textContent       = data.host_stats.disk_iops + '/sec';
                 document.getElementById('disk-latency').textContent    = data.host_stats.disk_latency + ' ms';
-                document.getElementById('io-wait').textContent         = data.host_stats.cpu_wait + '%';
+
                 document.getElementById('pod-count').textContent       = data.pod_count;
                 document.getElementById('cluster-count').textContent   = data.cluster_count;
 

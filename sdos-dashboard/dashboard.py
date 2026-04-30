@@ -54,7 +54,7 @@ def get_real_node_metrics():
         try:
             result = subprocess.run(
                 ['vagrant', 'ssh', vagrant_name, '-c',
-                 "top -bn2 | grep Cpu | tail -1 | awk '{printf \"%.1f\", 100-$8}'; echo; free | grep Mem | awk '{printf \"%.1f\", $3/$2*100}'"],
+                 "top -bn2 | grep Cpu | tail -1 | awk '{v=100-$8; if(v>100)v=100; if(v<0)v=0; printf \"%.1f\", v}'; echo; free | grep Mem | awk '{printf \"%.1f\", $3/$2*100}'"],
                 capture_output=True, text=True, timeout=15,
                 cwd=os.path.expanduser('~/fyp-cluster')
             )
@@ -371,20 +371,24 @@ DASHBOARD_TEMPLATE = """
             });
         }
 
-        function drawChart(elementId, data, color) {
+        function drawChart(elementId, data, color, capAt100=false) {
             const svg = document.getElementById(elementId);
             if (!data || data.length < 2) {
                 svg.innerHTML = '<text x="150" y="90" text-anchor="middle" fill="#999999" font-size="12">Collecting data...</text>';
                 return;
             }
-            const width=300,height=180,pL=35,pR=10,pT=30,pB=30;
+            const width=300,height=180,pL=50,pR=10,pT=30,pB=30;
             const gW=width-pL-pR, gH=height-pT-pB;
-            const maxV=Math.max(...data), minV=Math.min(...data), range=maxV-minV;
+            // Cap data at 100 if requested
+            const cappedData = capAt100 ? data.map(v => Math.min(100, v)) : data;
+            const maxV=Math.max(...cappedData), minV=Math.min(...cappedData), range=maxV-minV;
             let dMin,dMax;
-            if(range<3){const c=(maxV+minV)/2;dMin=Math.max(0,c-2.5);dMax=c+2.5;}
+            if(capAt100){dMin=0;dMax=100;}
+            else if(range<3){const c=(maxV+minV)/2;dMin=Math.max(0,c-2.5);dMax=c+2.5;}
             else{dMin=Math.max(0,minV-range*0.2);dMax=maxV+range*0.2;}
+            const data2use = capAt100 ? cappedData : data;
             const dR=dMax-dMin;
-            const pts=data.map((v,i)=>{ const x=pL+(i/(data.length-1))*gW; const y=pT+gH-((v-dMin)/dR)*gH; return x+','+y; }).join(' ');
+            const pts=data2use.map((v,i)=>{ const x=pL+(i/(data2use.length-1))*gW; const y=pT+gH-((v-dMin)/dR)*gH; return x+','+y; }).join(' ');
             let labels='',grid='';
             for(let i=0;i<=4;i++){
                 const v=dMin+(dR*i/4); const y=pT+gH-(i/4)*gH;
@@ -398,7 +402,7 @@ DASHBOARD_TEMPLATE = """
                 labels+
                 `<text x="${pL+gW/2}" y="${height-5}" text-anchor="middle" font-size="10" fill="#999999">Data Points (last 20 readings)</text>`+
                 `<text x="10" y="15" text-anchor="start" font-size="9" fill="#999999">Usage (%)</text>`+
-                `<text x="${pL+gW/2}" y="18" text-anchor="middle" font-size="13" fill="${color}" font-weight="bold">Current: ${data[data.length-1].toFixed(1)}%</text>`;
+                `<text x="${pL+gW/2}" y="18" text-anchor="middle" font-size="13" fill="${color}" font-weight="bold">Current: ${data2use[data2use.length-1].toFixed(1)}%</text>`;
         }
 
         async function fetchData() {
@@ -409,9 +413,9 @@ DASHBOARD_TEMPLATE = """
                 document.getElementById('pods').textContent    = data.active_deployments || 'N/A';
                 document.getElementById('jobs').textContent    = data.jenkins_jobs ? data.jenkins_jobs.length : 'N/A';
 
-                drawChart('cpu-chart',    data.cpu_history,    '#60a5fa');
-                drawChart('memory-chart', data.memory_history, '#22c55e');
-                drawChart('disk-chart',   data.disk_history,   '#f59e0b');
+                drawChart('cpu-chart',    data.cpu_history,    '#60a5fa', true);
+                drawChart('memory-chart', data.memory_history, '#22c55e', false);
+                drawChart('disk-chart',   data.disk_history,   '#f59e0b', false);
 
                 const grid = document.getElementById('server-grid');
                 if (data.servers) {
@@ -486,7 +490,7 @@ def get_data():
             if ram  is not None: total_memory += ram;  count_mem  += 1
             if disk is not None: total_disk   += disk; count_disk += 1
             servers.append({'name': display_name, 'cpu': cpu, 'ram': ram, 'disk': disk, 'latency': latency, 'status': status})
-        if count_cpu  > 0: cpu_history.append(round(total_cpu    / count_cpu,  1))
+        if count_cpu  > 0: cpu_history.append(min(100.0, round(total_cpu    / count_cpu,  1)))
         if count_mem  > 0: memory_history.append(round(total_memory / count_mem,  1))
         if count_disk > 0: disk_history.append(round(total_disk   / count_disk, 1))
         if len(cpu_history)    > 20: cpu_history.pop(0)
