@@ -210,7 +210,7 @@ HOME_TEMPLATE = '''
     <div class="header">
         <div style="width:100px;"></div>
         <div style="flex:1;text-align:center;">
-            <h1 style="margin:0;">SDOS Operating System</h1>
+            <h1 style="margin:0;">SDOS Home Page</h1>
             <p style="margin:4px 0 0 0;font-size:14px;color:#cccccc;font-style:italic;">Kubernetes Cluster Management and Monitoring Platform</p>
         </div>
         <div style="width:100px;display:flex;justify-content:flex-end;">

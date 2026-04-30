@@ -315,8 +315,8 @@ Vagrant.configure("2") do |config|
     worker.vm.network "forwarded_port", guest: 32080, host: 32080
 
     worker.vm.provider "libvirt" do |lv|
-      lv.memory = "4096"
-      lv.cpus = 4
+      lv.memory = "3072"
+      lv.cpus = 2
       lv.driver = "kvm"
     end
 
