@@ -7,7 +7,7 @@ pipeline {
         REPORT_FILE   = 'application-test-report.txt'
         DEV_URL       = 'http://192.168.121.20:30081'
         PROD_URL      = 'http://192.168.121.30:30082'
-        FRONTEND_URL  = 'http://localhost:30091'
+        FRONTEND_URL  = 'http://192.168.121.162:30091'
     }
 
     stages {
@@ -70,10 +70,10 @@ pipeline {
 
                     # Test frontend via vagrant ssh
                     cd $VAGRANT_DIR
-                    FRONTEND_STATUS=$(vagrant ssh worker-cicd -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    FRONTEND_LATENCY=$(vagrant ssh worker-cicd -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    echo "URL: http://worker-cicd:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s" >> $WORKSPACE/$REPORT_FILE
-                    echo "URL: http://worker-cicd:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s"
+                    FRONTEND_STATUS=$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                    FRONTEND_LATENCY=$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                    echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s" >> $WORKSPACE/$REPORT_FILE
+                    echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s"
 
                     # Node resource snapshot before load
                     echo "" >> $WORKSPACE/$REPORT_FILE
@@ -110,7 +110,7 @@ pipeline {
                     > /tmp/success_dev
                     > /tmp/fail_dev
                     DEV_START=$(date +%s%N)
-                    for batch in $(seq 1 100); do
+                    for batch in $(seq 1 500); do
                         for j in $(seq 1 100); do
                             (CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                                 --connect-timeout 3 --max-time 5 $DEV_URL 2>/dev/null || echo "000")
@@ -126,12 +126,12 @@ pipeline {
                     FAIL=$(grep -c "1" /tmp/fail_dev 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
                     DEV_END=$(date +%s%N)
                     DEV_DURATION=$(echo "scale=2; ($DEV_END - $DEV_START) / 1000000000" | bc)
-                    DEV_THROUGHPUT=$(echo "scale=0; 10000 / $DEV_DURATION" | bc 2>/dev/null || echo "N/A")
+                    DEV_THROUGHPUT=$(echo "scale=0; 50000 / $DEV_DURATION" | bc 2>/dev/null || echo "N/A")
 
-                    echo "Requests sent: 10000" >> $WORKSPACE/$REPORT_FILE
+                    echo "Requests sent: 50000" >> $WORKSPACE/$REPORT_FILE
                     echo "Successful: $SUCCESS" >> $WORKSPACE/$REPORT_FILE
                     echo "Failed: $FAIL" >> $WORKSPACE/$REPORT_FILE
-                    echo "Error rate: $(( FAIL * 100 / 10000 ))%" >> $WORKSPACE/$REPORT_FILE
+                    echo "Error rate: $(( FAIL * 100 / 50000 ))%" >> $WORKSPACE/$REPORT_FILE
                     echo "Total time: ${DEV_DURATION}s" >> $WORKSPACE/$REPORT_FILE
                     echo "Throughput: ${DEV_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
 
@@ -147,7 +147,7 @@ pipeline {
                     > /tmp/success_prod
                     > /tmp/fail_prod
                     PROD_START=$(date +%s%N)
-                    for batch in $(seq 1 100); do
+                    for batch in $(seq 1 500); do
                         for j in $(seq 1 100); do
                             (CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                                 --connect-timeout 3 --max-time 5 $PROD_URL 2>/dev/null || echo "000")
@@ -163,28 +163,25 @@ pipeline {
                     FAIL=$(grep -c "1" /tmp/fail_prod 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
                     PROD_END=$(date +%s%N)
                     PROD_DURATION=$(echo "scale=2; ($PROD_END - $PROD_START) / 1000000000" | bc)
-                    PROD_THROUGHPUT=$(echo "scale=0; 10000 / $PROD_DURATION" | bc 2>/dev/null || echo "N/A")
+                    PROD_THROUGHPUT=$(echo "scale=0; 50000 / $PROD_DURATION" | bc 2>/dev/null || echo "N/A")
 
-                    echo "Requests sent: 10000" >> $WORKSPACE/$REPORT_FILE
+                    echo "Requests sent: 50000" >> $WORKSPACE/$REPORT_FILE
                     echo "Successful: $SUCCESS" >> $WORKSPACE/$REPORT_FILE
                     echo "Failed: $FAIL" >> $WORKSPACE/$REPORT_FILE
-                    echo "Error rate: $(( FAIL * 100 / 10000 ))%" >> $WORKSPACE/$REPORT_FILE
+                    echo "Error rate: $(( FAIL * 100 / 50000 ))%" >> $WORKSPACE/$REPORT_FILE
                     echo "Total time: ${PROD_DURATION}s" >> $WORKSPACE/$REPORT_FILE
                     echo "Throughput: ${PROD_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
 
                     # Test frontend service via vagrant ssh
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "--- Frontend Service (worker-cicd:30091) ---" >> $WORKSPACE/$REPORT_FILE
+                    echo "--- Frontend Service (worker-dev:30091) ---" >> $WORKSPACE/$REPORT_FILE
 
                     cd $VAGRANT_DIR
-                    cd $VAGRANT_DIR
-                    vagrant ssh worker-cicd -c '
-                        SUCCESS=0; FAIL=0
-                        # Send 10000 requests in parallel batches of 100
+                    vagrant ssh worker-dev -c '
                         rm -f /tmp/success_fe /tmp/fail_fe
                         > /tmp/success_fe
                         > /tmp/fail_fe
-                        for batch in $(seq 1 100); do
+                        for batch in $(seq 1 500); do
                             for j in $(seq 1 100); do
                                 (CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://localhost:30091 2>/dev/null || echo 000)
                                 if [ "$CODE" = "200" ]; then echo 1 >> /tmp/success_fe; else echo 1 >> /tmp/fail_fe; fi) &
@@ -193,10 +190,10 @@ pipeline {
                         done
                         SUCCESS=$(grep -c "1" /tmp/success_fe 2>/dev/null | tr -d "\n" || echo 0); SUCCESS=${SUCCESS:-0}
                         FAIL=$(grep -c "1" /tmp/fail_fe 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
-                        echo "Requests sent: 10000"
+                        echo "Requests sent: 50000"
                         echo "Successful: $SUCCESS"
                         echo "Failed: $FAIL"
-                        echo "Error rate: $((FAIL * 100 / 10000))%"
+                        echo "Error rate: $((FAIL * 100 / 50000))%"
                     ' 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE || true
                 '''
             }
@@ -287,9 +284,9 @@ pipeline {
                         echo "URL: \$URL | Status: \$STATUS | Latency: \${LATENCY}s" >> \$WORKSPACE/\$REPORT_FILE
                     done
                     cd \$VAGRANT_DIR
-                    FSTATUS=\$(vagrant ssh worker-cicd -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    FLATENCY=\$(vagrant ssh worker-cicd -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    echo "URL: http://worker-cicd:30091 | Status: \$FSTATUS | Latency: \${FLATENCY}s" >> \$WORKSPACE/\$REPORT_FILE
+                    FSTATUS=\$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                    FLATENCY=\$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                    echo "URL: http://192.168.121.162:30091 | Status: \$FSTATUS | Latency: \${FLATENCY}s" >> \$WORKSPACE/\$REPORT_FILE
 
                     if [ "$RUNNING" -gt "18" ]; then
                         echo "" >> $WORKSPACE/$REPORT_FILE
