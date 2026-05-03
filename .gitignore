@@ -34,3 +34,4 @@ jenkins_agent.pub
 *-report.txt
 *.backup
 terraform/.terraform/
+terraform/.terraform/
