@@ -1,14 +1,6 @@
-# -*- mode: ruby -*-
-# vi: set ft=ruby :
-
-# FYP 5-Server K3s Cluster - KVM/libvirt Version
-# Fully automated - Jenkins, plugins, pipelines, host-agent all configured automatically
-# After `vagrant up`, everything is ready to use
-
 JENKINS_ADMIN_PASSWORD = "admin123"
-HOST_IP = "192.168.2.49"  # Your host machine IP - update this if it changes
+HOST_IP = "192.168.2.49"
 
-# Pipeline scripts
 RUN_PIPELINE = <<-'PIPELINE'
 pipeline {
     agent any
@@ -224,7 +216,6 @@ Vagrant.configure("2") do |config|
   config.vm.box = "generic/ubuntu2204"
   config.vm.box_check_update = false
 
-  # VM 1: Control Plane
   config.vm.define "control-plane" do |control|
     control.vm.hostname = "control-plane"
     control.vm.network "private_network", ip: "192.168.121.10"
@@ -255,7 +246,6 @@ Vagrant.configure("2") do |config|
     SHELL
   end
 
-  # VM 2: Worker Dev
   config.vm.define "worker-dev" do |worker|
     worker.vm.hostname = "worker-dev-integration"
     worker.vm.network "private_network", ip: "192.168.121.20"
@@ -281,7 +271,6 @@ Vagrant.configure("2") do |config|
     SHELL
   end
 
-  # VM 3: Worker Prod
   config.vm.define "worker-prod" do |worker|
     worker.vm.hostname = "worker-production"
     worker.vm.network "private_network", ip: "192.168.121.30"
@@ -308,7 +297,6 @@ Vagrant.configure("2") do |config|
     SHELL
   end
 
-  # VM 4: Worker CI/CD — Jenkins fully automated
   config.vm.define "worker-cicd" do |worker|
     worker.vm.hostname = "worker-cicd"
     worker.vm.network "private_network", ip: "192.168.121.40"
@@ -316,7 +304,7 @@ Vagrant.configure("2") do |config|
 
     worker.vm.provider "libvirt" do |lv|
       lv.memory = "4096"
-      lv.cpus = 4
+      lv.cpus = 3
       lv.driver = "kvm"
     end
 
@@ -332,11 +320,9 @@ Vagrant.configure("2") do |config|
         --node-label="node-role=cicd" \
         --node-label="environment=cicd"
 
-      # Install Docker
       curl -fsSL https://get.docker.com | sudo sh
       sudo usermod -aG docker vagrant
 
-      # Run Jenkins
       sudo docker run -d \
         --name jenkins \
         --restart unless-stopped \
@@ -353,14 +339,11 @@ Vagrant.configure("2") do |config|
       sleep 20
       echo "Jenkins is up"
 
-      # Get initial admin password
       INIT_PASS=$(sudo docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword)
       echo "Initial password: $INIT_PASS"
 
-      # Install Jenkins CLI
       sudo docker exec jenkins curl -s http://localhost:8080/jnlpJars/jenkins-cli.jar -o /tmp/jenkins-cli.jar
 
-      # Install required plugins
       sudo docker exec jenkins java -jar /tmp/jenkins-cli.jar \
         -s http://localhost:8080 \
         -auth admin:$INIT_PASS \
@@ -381,7 +364,6 @@ Vagrant.configure("2") do |config|
         sleep 10
       done
 
-      # Create admin user with default password using Groovy script
       sudo docker exec jenkins bash -c "cat > /tmp/create-admin.groovy << 'EOF'
 import jenkins.model.*
 import hudson.security.*
@@ -389,10 +371,8 @@ import jenkins.install.*
 
 def instance = Jenkins.getInstance()
 
-// Skip setup wizard
 instance.setInstallState(InstallState.INITIAL_SETUP_COMPLETED)
 
-// Create admin user
 def hudsonRealm = new HudsonPrivateSecurityRealm(false)
 hudsonRealm.createAccount('admin', '#{JENKINS_ADMIN_PASSWORD}')
 instance.setSecurityRealm(hudsonRealm)
@@ -411,35 +391,29 @@ EOF
 
       sleep 10
 
-      # Save initial password and new password to vagrant shared folder
       echo "Jenkins URL:      http://192.168.121.40:32080" > /vagrant/jenkins-info.txt
       echo "Username:         admin" >> /vagrant/jenkins-info.txt
       echo "Password:         #{JENKINS_ADMIN_PASSWORD}" >> /vagrant/jenkins-info.txt
       echo "Initial password: $INIT_PASS" >> /vagrant/jenkins-info.txt
 
-      echo "CI/CD Worker Ready — Jenkins running at http://192.168.121.40:32080"
+      echo "CI/CD Worker Ready Jenkins running at http://192.168.121.40:32080"
     SHELL
 
-    # Second provisioner — create pipelines and host-agent (runs after Jenkins is up)
     worker.vm.provision "shell", inline: <<-CREATEJOBS
       JENKINS_URL="http://localhost:32080"
       AUTH="admin:#{JENKINS_ADMIN_PASSWORD}"
 
-      # Wait for Jenkins to be fully ready
       until curl -s -u $AUTH $JENKINS_URL/api/json > /dev/null 2>&1; do
         echo "Waiting for Jenkins API..."
         sleep 10
       done
       echo "Jenkins API ready"
 
-      # Get crumb for CSRF protection
       CRUMB=$(curl -s -u $AUTH "$JENKINS_URL/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)" 2>/dev/null || echo "")
 
-      # Function to create a pipeline job
       create_job() {
         JOB_NAME=$1
         PIPELINE_SCRIPT=$2
-        # Escape for XML
         ESCAPED=$(echo "$PIPELINE_SCRIPT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g')
         XML="<?xml version='1.1' encoding='UTF-8'?>
 <flow-definition plugin='workflow-job'>
@@ -462,7 +436,6 @@ EOF
         echo "Created pipeline: $JOB_NAME"
       }
 
-      # Create pipelines
       create_job "run" "pipeline { agent any stages { stage('Build') { steps { echo 'Building...'; sleep 6 } } stage('Test') { steps { echo 'Testing...'; sleep 6 } } stage('Staging') { steps { echo 'Staging...'; sleep 6 } } stage('Load') { steps { echo 'Load testing...'; sleep 6 } } stage('Production') { steps { echo 'Deploying...'; sleep 6 } } } }"
 
       create_job "demo-pipeline" "pipeline { agent any stages { stage('Build') { steps { echo 'Building demo...'; sleep 6 } } stage('Test') { steps { echo 'Testing demo...'; sleep 6 } } stage('Staging') { steps { echo 'Staging demo...'; sleep 6 } } stage('Load') { steps { echo 'Load testing...'; sleep 6 } } stage('Production') { steps { echo 'Deploying demo...'; sleep 6 } } } }"
@@ -472,7 +445,6 @@ EOF
       create_job "hello-world" "pipeline { agent any stages { stage('Hello') { steps { echo 'Hello World from SDOS!' } } stage('Test') { steps { echo 'All tests passed!'; sleep 6 } } } }"
 
 
-      # Create load test pipeline from file
       if [ -f /vagrant/Jenkinsfiles/safe-load-test ]; then
         LOAD_SCRIPT=$(cat /vagrant/Jenkinsfiles/safe-load-test)
         create_job "safe-load-test" "$LOAD_SCRIPT"
@@ -480,7 +452,6 @@ EOF
         echo "WARNING: safe-load-test Jenkinsfile not found in repo"
       fi
 
-      # Create nginx deploy pipeline from file
       if [ -f /vagrant/Jenkinsfiles/nginx-deploy ]; then
         NGINX_SCRIPT=$(cat /vagrant/Jenkinsfiles/nginx-deploy)
         create_job "nginx-deploy" "$NGINX_SCRIPT"
@@ -489,18 +460,14 @@ EOF
       fi
       echo "All pipelines created"
 
-      # Set up SSH key for host-agent
-      # Generate SSH key pair on the VM
       sudo -u vagrant ssh-keygen -t ed25519 -f /home/vagrant/.ssh/jenkins_agent -N "" -q 2>/dev/null || true
       PUB_KEY=$(cat /home/vagrant/.ssh/jenkins_agent.pub 2>/dev/null || echo "")
       PRIV_KEY=$(cat /home/vagrant/.ssh/jenkins_agent 2>/dev/null || echo "")
 
-      # Save public key to shared folder so host setup script can add it
       echo "$PUB_KEY" > /vagrant/jenkins_agent.pub
       echo "$PRIV_KEY" > /vagrant/jenkins_agent.key
       chmod 600 /vagrant/jenkins_agent.key
 
-      # Add SSH credential to Jenkins via Groovy
       sudo docker exec jenkins bash -c "cat > /tmp/add-ssh-cred.groovy << 'GROOVY'
 import com.cloudbees.jenkins.plugins.sshcredentials.impl.*
 import com.cloudbees.plugins.credentials.*
@@ -523,7 +490,6 @@ println 'SSH credential added'
 GROOVY
 " 2>/dev/null || true
 
-      # Add host-agent node via Jenkins API
       NODE_XML="<?xml version='1.1' encoding='UTF-8'?>
 <slave>
   <name>host-agent</name>
@@ -560,7 +526,6 @@ GROOVY
     CREATEJOBS
   end
 
-  # VM 5: Worker Monitoring
   config.vm.define "worker-monitoring" do |worker|
     worker.vm.hostname = "worker-registry-monitoring"
     worker.vm.network "private_network", ip: "192.168.121.50"

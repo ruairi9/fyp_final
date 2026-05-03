@@ -167,7 +167,6 @@ PIPELINE_DASHBOARD_TEMPLATE = '''
             border-radius: 20px; color: #cccccc; letter-spacing: 0.5px;
         }
 
-        /* Status badge */
         .status-badge {
             padding: 6px 16px; border-radius: 20px;
             font-weight: bold; font-size: 13px; letter-spacing: 0.5px;
@@ -351,8 +350,6 @@ def get_pipeline_api_data():
         return jsonify({'pipelines': pipelines})
     except Exception as e:
         print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

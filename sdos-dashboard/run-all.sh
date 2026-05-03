@@ -2,7 +2,6 @@
 cd "$(dirname "$0")"
 mkdir -p logs
 
-# Kill anything already on these ports
 for PORT in 5000 6001 7000 8080 9000; do
     fuser -k ${PORT}/tcp 2>/dev/null
 done

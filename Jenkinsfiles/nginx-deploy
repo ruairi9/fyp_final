@@ -17,13 +17,12 @@ pipeline {
         stage('Build') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — BUILD'
+                echo ' STAGE 1 BUILD'
                 echo ' Creating nginx Kubernetes manifests'
                 echo '============================================'
                 sh '''
                     mkdir -p /tmp/sdos-nginx
 
-                    # Dev deployment manifest
                     cat > /tmp/sdos-nginx/dev-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -76,7 +75,6 @@ spec:
     nodePort: 30081
 EOF
 
-                    # Staging deployment manifest (separate namespace, separate workload)
                     cat > /tmp/sdos-nginx/stg-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -129,7 +127,6 @@ spec:
     nodePort: 30083
 EOF
 
-                    # Production deployment manifest
                     cat > /tmp/sdos-nginx/prod-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -190,7 +187,7 @@ EOF
         stage('Test') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — TEST'
+                echo ' STAGE 2 TEST'
                 echo ' Deploying nginx to worker-dev'
                 echo '============================================'
                 sh '''
@@ -218,7 +215,7 @@ EOF
         stage('Staging') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — STAGING'
+                echo ' STAGE 3 STAGING'
                 echo ' Deploying to dedicated staging namespace'
                 echo ' Running test pod inside Kubernetes cluster'
                 echo '============================================'
@@ -303,7 +300,7 @@ EOF
         stage('Load') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — LOAD TEST'
+                echo ' STAGE 4 LOAD TEST'
                 echo ' Running load test with response time metrics'
                 echo ' Gates production if avg response time > 3s'
                 echo '============================================'
@@ -340,16 +337,16 @@ EOF
                     echo "============================================"
 
                     if [ "$SUCCESS" -lt "40" ]; then
-                        echo "FAIL: Success rate too low — blocking production deploy"
+                        echo "FAIL: Success rate too low blocking production deploy"
                         exit 1
                     fi
 
                     if awk "BEGIN { exit !($AVG_TIME > 3.0) }"; then
-                        echo "FAIL: Avg response time too high (${AVG_TIME}s) — blocking production deploy"
+                        echo "FAIL: Avg response time too high (${AVG_TIME}s) blocking production deploy"
                         exit 1
                     fi
 
-                    echo "PASS: Load test passed — avg response time ${AVG_TIME}s"
+                    echo "PASS: Load test passed avg response time ${AVG_TIME}s"
                 '''
             }
         }
@@ -357,7 +354,7 @@ EOF
         stage('Production') {
             steps {
                 echo '============================================'
-                echo ' STAGE 5 — PRODUCTION'
+                echo ' STAGE 5 PRODUCTION'
                 echo ' Deploying nginx to worker-production'
                 echo ' Running test pod inside Kubernetes cluster'
                 echo '============================================'
@@ -425,7 +422,7 @@ EOF
                             if [ "$FAIL" -gt "0" ]; then
                                 echo "WARNING: $FAIL production test(s) failed"
                             else
-                                echo "DEPLOYMENT COMPLETE — all production tests passed!"
+                                echo "DEPLOYMENT COMPLETE all production tests passed!"
                             fi
                         ' || true
 

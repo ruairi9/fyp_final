@@ -133,7 +133,6 @@ def get_vm_metrics():
 def get_host_stats():
     global _previous_network_bytes, _previous_network_time
     try:
-        # ── RAM ───────────────────────────────────────────────────
         ram_result = subprocess.run(['free', '-m'], capture_output=True, text=True, timeout=3)
         total_ram = used_ram = swap_used = swap_total = 0
         if ram_result.returncode == 0:
@@ -150,7 +149,6 @@ def get_host_stats():
         ram_percent  = round((used_ram  / total_ram  * 100), 1) if total_ram  > 0 else 0
         swap_percent = round((swap_used / swap_total * 100), 1) if swap_total > 0 else 0
 
-        # ── CPU ───────────────────────────────────────────────────
         cpu_result = subprocess.run(['top', '-bn1'], capture_output=True, text=True, timeout=3)
         cpu_percent = cpu_wait = 0
         cpu_steal = 0.0
@@ -168,7 +166,6 @@ def get_host_stats():
                         cpu_steal = round(float(steal_match.group(1)), 1)
                     break
 
-        # ── DISK ──────────────────────────────────────────────────
         disk_result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, timeout=3)
         disk_percent = 0
         if disk_result.returncode == 0:
@@ -176,10 +173,6 @@ def get_host_stats():
             if len(lines) > 1:
                 disk_percent = int(lines[1].split()[4].replace('%', ''))
 
-        # ── IOSTAT ────────────────────────────────────────────────
-        # Columns (0-indexed):
-        # 0=Device 1=r/s 2=rkB/s 3=rrqm/s 4=%rrqm 5=r_await 6=rareq-sz
-        # 7=w/s 8=wkB/s 9=wrqm/s 10=%wrqm 11=w_await 12=wareq-sz ...
         iostat_result = subprocess.run(
             ['iostat', '-x', '1', '1'],
             capture_output=True, text=True, timeout=5
@@ -188,10 +181,8 @@ def get_host_stats():
         if iostat_result.returncode == 0:
             for line in iostat_result.stdout.split('\n'):
                 parts = line.split()
-                # Skip loop devices, header lines, empty lines
                 if not parts or parts[0].startswith('loop') or parts[0] in ('Device', 'Linux', 'avg-cpu:'):
                     continue
-                # Match real disk devices: nvme, sda, vda etc
                 if re.match(r'^(nvme|sd|vd|hd)', parts[0]) and len(parts) >= 12:
                     try:
                         disk_iops       = round(float(parts[1]) + float(parts[7]), 1)   # r/s + w/s
@@ -201,7 +192,6 @@ def get_host_stats():
                         print(f"iostat parse error: {e}")
                     break
 
-        # ── PAGE FAULTS ───────────────────────────────────────────
         page_faults = 0
         try:
             with open('/proc/vmstat', 'r') as f:
@@ -216,7 +206,6 @@ def get_host_stats():
         except:
             pass
 
-        # ── OOM EVENTS ────────────────────────────────────────────
         oom_events = 0
         try:
             dmesg_result = subprocess.run(
@@ -232,7 +221,6 @@ def get_host_stats():
         except:
             pass
 
-        # ── CACHE FAULTS ──────────────────────────────────────────
         cache_faults = 0
         try:
             perf_result = subprocess.run(
@@ -250,7 +238,6 @@ def get_host_stats():
         except:
             pass
 
-        # ── NETWORK ───────────────────────────────────────────────
         network_traffic = 0.0
         try:
             current_time = time.time()
@@ -462,12 +449,10 @@ SERVER_DASHBOARD_TEMPLATE = '''
             selectedVM = vmName;
             document.getElementById('selected-vm-label').textContent = 'Selected VM: ' + vmName;
 
-            // Init storage for this VM if needed
             if (!allVMData[vmName]) {
                 allVMData[vmName] = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
             }
 
-            // Store new data point for this VM
             if (vmData) {
                 allVMData[vmName].cpu.push(vmData.cpu);
                 allVMData[vmName].memory.push(vmData.ram);
@@ -477,7 +462,6 @@ SERVER_DASHBOARD_TEMPLATE = '''
                 });
             }
 
-            // Draw charts using this VM's history
             const d = allVMData[vmName];
             drawChart('cpu-chart',    d.cpu,    '#60a5fa', 'CPU %', 100, false);
             drawChart('memory-chart', d.memory, '#22c55e', 'RAM %', 100, false);
@@ -522,7 +506,6 @@ SERVER_DASHBOARD_TEMPLATE = '''
                 const tbody = document.querySelector('#vm-table tbody');
                 tbody.innerHTML = '';
                 data.vms.forEach(vm => {
-                    // Store data for ALL VMs continuously
                     if (!allVMData[vm.name]) {
                         allVMData[vm.name] = { cpu: [], memory: [], diskIO: [], latency: [], network: [] };
                     }
@@ -552,7 +535,6 @@ SERVER_DASHBOARD_TEMPLATE = '''
                     }
                 });
 
-                // Refresh charts for currently selected VM
                 if (selectedVM && allVMData[selectedVM]) {
                     document.getElementById('selected-vm-label').textContent = 'Selected VM: ' + selectedVM;
                     const d = allVMData[selectedVM];

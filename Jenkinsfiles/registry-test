@@ -17,11 +17,11 @@ pipeline {
         stage('Build') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — REGISTRY CONNECTIVITY'
+                echo ' STAGE 1 REGISTRY CONNECTIVITY'
                 echo ' Checking registry is reachable'
                 echo '============================================'
                 sh '''
-                    echo "Registry Test Report — $(date)" > $REPORT_FILE
+                    echo "Registry Test Report $(date)" > $REPORT_FILE
                     echo "Registry: $REGISTRY" >> $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
@@ -30,7 +30,6 @@ pipeline {
                     PASS=0
                     FAIL=0
 
-                    # Test 1: Registry pod is running
                     RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods -n monitoring \
                         --no-headers 2>/dev/null | grep docker-registry | grep -c Running || echo 0)
                     if [ "$RUNNING" -ge "1" ]; then
@@ -43,7 +42,6 @@ pipeline {
                         FAIL=$((FAIL+1))
                     fi
 
-                    # Test 2: Registry HTTP endpoint
                     CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                         $REGISTRY_URL/v2/ --connect-timeout 10 || echo "000")
                     if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
@@ -56,7 +54,6 @@ pipeline {
                         FAIL=$((FAIL+1))
                     fi
 
-                    # Test 3: Authentication works
                     AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                         -u $REG_USER:$REG_PASS \
                         $REGISTRY_URL/v2/ --connect-timeout 10 || echo "000")
@@ -86,14 +83,13 @@ pipeline {
         stage('Test') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — PUSH TEST'
+                echo ' STAGE 2 PUSH TEST'
                 echo ' Build and push a test image to registry'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== PUSH TEST ===" >> $REPORT_FILE
 
-                    # Create a minimal test Dockerfile
                     mkdir -p /tmp/registry-test
                     cat > /tmp/registry-test/Dockerfile <<EOF
 FROM alpine:latest
@@ -102,20 +98,18 @@ RUN echo "Registry push/pull test image" > /test.txt
 CMD ["cat", "/test.txt"]
 EOF
 
-                    # Check disk before build
                     DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
                     echo "Host disk before build: ${DISK}%"
                     echo "Host disk before build: ${DISK}%" >> $REPORT_FILE
 
                     if [ "$DISK" -gt "97" ]; then
-                        echo "WARN: Host disk at ${DISK}% — skipping build to protect disk"
-                        echo "WARN: Skipped build — disk too full" >> $REPORT_FILE
+                        echo "WARN: Host disk at ${DISK}% skipping build to protect disk"
+                        echo "WARN: Skipped build disk too full" >> $REPORT_FILE
                         echo "SKIPPED" > /tmp/registry_test_skipped
                         exit 0
                     fi
                     rm -f /tmp/registry_test_skipped
 
-                    # Login and push
                     docker login $REGISTRY -u $REG_USER -p $REG_PASS 2>/dev/null
                     docker build -t $REGISTRY/$TEST_IMAGE:$TEST_TAG /tmp/registry-test/ 2>/dev/null
                     docker push $REGISTRY/$TEST_IMAGE:$TEST_TAG
@@ -135,24 +129,21 @@ EOF
         stage('Staging') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — PULL TEST'
+                echo ' STAGE 3 PULL TEST'
                 echo ' Pull the test image back from registry'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== PULL TEST ===" >> $REPORT_FILE
 
-                    # Skip if stage 2 was skipped due to disk
                     if [ -f /tmp/registry_test_skipped ]; then
-                        echo "SKIP: Pull test skipped — build was skipped due to full disk"
+                        echo "SKIP: Pull test skipped build was skipped due to full disk"
                         echo "SKIP: Pull test skipped" >> $REPORT_FILE
                         exit 0
                     fi
 
-                    # Remove local copy first
                     docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true
 
-                    # Pull from registry
                     docker pull $REGISTRY/$TEST_IMAGE:$TEST_TAG
 
                     if [ $? -eq 0 ]; then
@@ -164,10 +155,9 @@ EOF
                         exit 1
                     fi
 
-                    # Verify image runs
                     OUTPUT=$(docker run --rm $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null)
                     if echo "$OUTPUT" | grep -q "Registry push/pull test image"; then
-                        echo "PASS: Image runs correctly — output verified"
+                        echo "PASS: Image runs correctly output verified"
                         echo "PASS: Image runs and output verified" >> $REPORT_FILE
                     else
                         echo "WARN: Image ran but output unexpected"
@@ -180,7 +170,7 @@ EOF
         stage('Load') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — CATALOG CHECK'
+                echo ' STAGE 4 CATALOG CHECK'
                 echo ' List all images in registry'
                 echo '============================================'
                 sh '''
@@ -212,18 +202,16 @@ EOF
         stage('Production') {
             steps {
                 echo '============================================'
-                echo ' STAGE 5 — CLEANUP AND DISK CHECK'
+                echo ' STAGE 5 CLEANUP AND DISK CHECK'
                 echo ' Remove test image and check disk usage'
                 echo '============================================'
                 sh '''
-                    # Clean up test image locally
                     docker rmi $REGISTRY/$TEST_IMAGE:$TEST_TAG 2>/dev/null || true
                     rm -rf /tmp/registry-test
 
                     echo "" >> $REPORT_FILE
                     echo "=== DISK USAGE AFTER TEST ===" >> $REPORT_FILE
 
-                    # Check disk on all VMs
                     cd /home/ruairi/fyp-cluster
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         DISK=$(vagrant ssh $VM -c \
@@ -231,7 +219,7 @@ EOF
                             2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
                         if [ -n "$DISK" ]; then
                             if [ "$DISK" -gt "90" ] 2>/dev/null; then
-                                echo "WARN: $VM disk at ${DISK}% — getting full"
+                                echo "WARN: $VM disk at ${DISK}% getting full"
                                 echo "WARN: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
                             else
                                 echo "PASS: $VM disk at ${DISK}%"
@@ -240,7 +228,6 @@ EOF
                         fi
                     done
 
-                    # Host disk
                     HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
                     echo "Host disk: ${HOST_DISK}%"
                     echo "Host disk: ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
@@ -249,9 +236,9 @@ EOF
                     echo "=== REGISTRY TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║       REGISTRY TEST REPORT             ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "REGISTRY TEST REPORT"
+                    echo '============================================'
                     cat $WORKSPACE/$REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'registry-test-report.txt', fingerprint: true
@@ -266,7 +253,7 @@ EOF
                 rm -rf /tmp/registry-test || true
             '''
         }
-        success { echo 'Registry test passed — push and pull working correctly' }
-        failure { echo 'Registry test failed — check the logs above' }
+        success { echo 'Registry test passed push and pull working correctly' }
+        failure { echo 'Registry test failed check the logs above' }
     }
 }

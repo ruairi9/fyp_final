@@ -7,7 +7,6 @@ import subprocess
 import json
 import base64
 import secrets
-import shutil
 from collections import defaultdict
 import re
 
@@ -28,14 +27,13 @@ def _get_session():
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 
-# Persistent storage files
+
 REPOS_FILE   = os.path.expanduser('~/fyp-cluster/sdos-dashboard/github_repos.json')
 EDITS_FILE   = os.path.expanduser('~/fyp-cluster/sdos-dashboard/github_edits.json')
 DELETES_FILE = os.path.expanduser('~/fyp-cluster/sdos-dashboard/github_pending_deletes.json')
 CLONES_DIR   = os.path.expanduser('~/fyp-cluster/sdos-dashboard/github-clones')
 
 def load_pending_deletes():
-    """Load staged (not yet committed) deletes: {repo: [{path, sha, type, folder_delete}]}"""
     if os.path.exists(DELETES_FILE):
         try:
             with open(DELETES_FILE, 'r') as f:
@@ -171,7 +169,6 @@ def save_github_file(token, owner, repo, path, content, sha):
     try:
         url = f'https://api.github.com/repos/{owner}/{repo}/contents/{path}'
         content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-        # Ensure content ends with newline (fixes W292 lint error)
         if not content.endswith('\n'):
             content = content + '\n'
         content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
@@ -212,7 +209,6 @@ def create_github_file(token, owner, repo, path, content):
         return {'success': False, 'error': str(e)}
 
 def delete_github_file(token, owner, repo, path, sha):
-    """Delete a single file from GitHub"""
     import urllib.request
     try:
         url = f'https://api.github.com/repos/{owner}/{repo}/contents/{path}'
@@ -231,7 +227,6 @@ def delete_github_file(token, owner, repo, path, sha):
         return {'success': False, 'error': str(e)}
 
 def get_folder_files_with_sha(token, owner, repo, folder_path):
-    """Get all files (with sha) inside a folder recursively"""
     import urllib.request
     files = []
     try:
@@ -355,7 +350,6 @@ WORKSPACE_TEMPLATE = '''
             margin-top: 25px;
         }
 
-        /* Folder creation mode toggle */
         .folder-mode-tabs {
             display: flex;
             gap: 8px;
@@ -385,7 +379,6 @@ WORKSPACE_TEMPLATE = '''
             display: block;
         }
         
-        /* ── Main layout: left panel | 8px drag handle | editor+terminal ── */
         .main-container {
             display: grid;
             grid-template-columns: var(--left-width, 350px) 8px 1fr;
@@ -942,7 +935,6 @@ WORKSPACE_TEMPLATE = '''
     </style>
 </head>
 <body>
-    <!-- GitHub repo modal -->
     <div class="modal" id="github-modal">
         <div class="modal-content">
             <div class="modal-header">Add GitHub Repository</div>
@@ -969,7 +961,6 @@ WORKSPACE_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- New file modal -->
     <div class="modal" id="new-file-modal">
         <div class="modal-content">
             <div class="modal-header">Create New File</div>
@@ -991,17 +982,16 @@ WORKSPACE_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- New folder modal — supports empty folder OR folder with a file -->
     <div class="modal" id="new-folder-modal">
         <div class="modal-content">
             <div class="modal-header">Create New Folder</div>
 
             <div class="folder-mode-tabs">
                 <div class="folder-mode-tab active" id="tab-empty" onclick="setFolderMode('empty')">
-                    📁 Empty Folder
+                    Empty Folder
                 </div>
                 <div class="folder-mode-tab" id="tab-with-file" onclick="setFolderMode('with-file')">
-                    📄 Folder + File
+                    Folder + File
                 </div>
             </div>
 
@@ -1106,8 +1096,6 @@ WORKSPACE_TEMPLATE = '''
         <div class="command-line">
             <div class="command-header">COMMAND LINE</div>
             <div class="command-content" id="terminal">$ SDOS Developer Workspace
-$ Drag handles on files for reordering
-$ Empty folders supported
 $ </div>
         </div>
     </div>
@@ -1136,7 +1124,7 @@ $ </div>
         
         require(['vs/editor/editor.main'], function() {
             editor = monaco.editor.create(document.getElementById('monaco-editor'), {
-                value: '# SDOS Developer Workspace\\n# \\n# Drag handles on file items\\n# Empty folders supported\\n',
+                value: '',
                 language: 'python',
                 theme: 'vs-dark',
                 automaticLayout: true,
@@ -1148,7 +1136,6 @@ $ </div>
             
             addTerminalLine('Monaco Editor initialized');
 
-            // Re-check session every 30 seconds — redirect if logged out
             setInterval(async function() {
                 try {
                     const res = await fetch('http://localhost:5000/api/check-session');
@@ -1163,13 +1150,11 @@ $ </div>
             loadPendingDeletes().then(() => loadFileList());
         });
 
-        // ── FIXED: redirect to home page instead of reloading ──
         async function logout() {
             await fetch('http://localhost:5000/api/logout', { method: 'POST' });
             window.location.href = 'http://localhost:5000';
         }
 
-        // ─── Folder mode toggle ───────────────────────────────────────────
         function setFolderMode(mode) {
             folderCreateMode = mode;
             document.getElementById('tab-empty').classList.toggle('active', mode === 'empty');
@@ -1177,7 +1162,6 @@ $ </div>
             document.getElementById('folder-file-section').classList.toggle('active', mode === 'with-file');
         }
         
-        // ─── Modal helpers ────────────────────────────────────────────────
         function showGithubModal() {
             document.getElementById('github-modal').classList.add('active');
         }
@@ -1208,7 +1192,6 @@ $ </div>
             document.getElementById('new-folder-modal').classList.remove('active');
         }
         
-        // ─── Create new file ──────────────────────────────────────────────
         async function createNewFile() {
             const filePath = document.getElementById('new-file-path').value.trim();
             if (!filePath) { addTerminalLine(' Please enter a file path'); return; }
@@ -1217,7 +1200,7 @@ $ </div>
             pendingCreates.push({ repo: selectedRepoForNewFile, path: filePath });
             closeNewFileModal();
             await loadFileList();
-            addTerminalLine(` Staged new file ${filePath} — hit Save All then Commit All to push`);
+            addTerminalLine(` Staged new file ${filePath} hit Save All then Commit All to push`);
 
             const fileName = filePath.split('/').pop();
             editor.setValue('');
@@ -1235,7 +1218,6 @@ $ </div>
             editor.focus();
         }
         
-        // ─── Create new folder ────────────────────────────────────────────
         async function createNewFolder() {
             const folderName = document.getElementById('new-folder-name').value.trim();
             if (!folderName) { addTerminalLine(' Please enter a folder name'); return; }
@@ -1262,13 +1244,12 @@ $ </div>
 
             await loadFileList();
             if (folderCreateMode === 'with-file') {
-                addTerminalLine(` Staged new folder ${folderPath} — hit Save All then Commit All to push`);
+                addTerminalLine(` Staged new folder ${folderPath} hit Save All then Commit All to push`);
             } else {
-                addTerminalLine(` Staged empty folder ${folderPath} — hit Save All then Commit All to push`);
+                addTerminalLine(` Staged empty folder ${folderPath} hit Save All then Commit All to push`);
             }
         }
         
-        // ─── Load GitHub repos ────────────────────────────────────────────
         async function loadGithubRepos() {
             const response = await fetch('/api/list-github-repos');
             const data = await response.json();
@@ -1332,7 +1313,6 @@ $ </div>
             }
         }
         
-        // ─── Folder toggle ────────────────────────────────────────────────
         function toggleFolder(repoName) {
             const folder = document.getElementById('folder-' + repoName.replace(/\//g, '-'));
             if (folder) folder.classList.toggle('collapsed');
@@ -1342,7 +1322,6 @@ $ </div>
             if (folder) folder.classList.toggle('collapsed');
         }
         
-        // ─── Drag-and-drop helpers ────────────────────────────────────────
         let dragSrc = null;
 
         function addDragEvents(el) {
@@ -1398,7 +1377,6 @@ $ </div>
             return h;
         }
         
-        // ─── Build folder tree ────────────────────────────────────────────
         function buildFolderTree(files, repoName) {
             const tree = {};
             const rootFiles = [];
@@ -1423,7 +1401,6 @@ $ </div>
             return { tree, rootFiles };
         }
         
-        // ─── Load file list ───────────────────────────────────────────────
         async function loadFileList() {
             try {
                 const response = await fetch('/api/list-all-files');
@@ -1583,7 +1560,7 @@ $ </div>
                                 if (!isPendingDel) {
                                     label.onclick = () => loadFile(file.path, file.name, 'github', file.repo, file.sha || '');
                                 } else {
-                                    label.title = 'Staged for deletion — Commit All to apply';
+                                    label.title = 'Staged for deletion Commit All to apply';
                                 }
 
                                 const delBtn = document.createElement('button');
@@ -1622,7 +1599,7 @@ $ </div>
                             if (!isPendingDel) {
                                 label.onclick = () => loadFile(file.path, file.name, 'github', file.repo, file.sha || '');
                             } else {
-                                label.title = 'Staged for deletion — Commit All to apply';
+                                label.title = 'Staged for deletion Commit All to apply';
                             }
 
                             const delBtn = document.createElement('button');
@@ -1767,7 +1744,6 @@ $ </div>
             if (!currentFilePath) { addTerminalLine('Not a GitHub file'); return; }
             const content = editor.getValue();
 
-            // Pre-push lint check for Python files
             if (currentFile.endsWith('.py')) {
                 addTerminalLine('Running lint check before push...');
                 try {
@@ -1778,19 +1754,18 @@ $ </div>
                     });
                     const ld = await lr.json();
                     if (!ld.passed) {
-                        addTerminalLine(`LINT FAILED — push blocked. ${currentFile} has issues:`);
+                        addTerminalLine(`LINT FAILED push blocked. ${currentFile} has issues:`);
                         ld.issues.forEach(i => addTerminalLine('  ' + i));
                         addTerminalLine(`Fix the issues in ${currentFile} above then try pushing again.`);
                         return;
                     }
-                    addTerminalLine('Lint passed — pipeline must run before push.');
+                    addTerminalLine('Lint passed pipeline must run before push.');
                 } catch(e) {
                     addTerminalLine('Could not run lint check.');
                     return;
                 }
             }
 
-            // Show pipeline modal BEFORE pushing — push only happens after pipeline runs
             showPipelineModal(currentRepo, content);
             return;
 
@@ -1810,25 +1785,23 @@ $ </div>
                         body: JSON.stringify({ repo: currentRepo })
                     }).then(r => r.json()).then(d => {
                         if (d.success) {
-                            addTerminalLine(`Lint triggered for ${currentRepo} — polling result...`);
+                            addTerminalLine(`Lint triggered for ${currentRepo} polling result...`);
                             let polls = 0;
                             const pollLint = setInterval(async () => {
                                 polls++;
-                                if (polls > 24) { clearInterval(pollLint); addTerminalLine(' Lint check timed out — check Jenkins manually'); return; }
+                                if (polls > 24) { clearInterval(pollLint); addTerminalLine(' Lint check timed out check Jenkins manually'); return; }
                                 try {
                                     const lr = await fetch('/api/check-lint-result', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
                                     const ld = await lr.json();
                                     if (!ld.building && ld.result) {
                                         clearInterval(pollLint);
-                                        if (ld.result === 'SUCCESS') addTerminalLine(`Jenkins lint PASSED — all repo files are clean, safe to merge`);
-                                        else addTerminalLine(`Jenkins lint found issues in other repo files — check Jenkins for details`);
+                                        if (ld.result === 'SUCCESS') addTerminalLine(`Jenkins lint PASSED all repo files are clean, safe to merge`);
+                                        else addTerminalLine(`Jenkins lint found issues in other repo files check Jenkins for details`);
                                     }
                                 } catch(e) {}
                             }, 5000);
                         } else addTerminalLine(` Could not trigger lint: ${d.error}`);
                     }).catch(() => {});
-                    // Don't push yet - show pipeline modal first
-                    // Push will happen after pipeline runs successfully
                     showPipelineModal(currentRepo, content);
                 } else {
                     addTerminalLine(`Error: ${data.error}`);
@@ -1860,7 +1833,6 @@ $ </div>
             }
         }
         
-        // ─── Pending deletes tracking ─────────────────────────────────────
         async function loadPendingDeletes() {
             try {
                 const r = await fetch('/api/pending-deletes');
@@ -1922,7 +1894,7 @@ $ </div>
 
         async function confirmDeleteFile(filepath, sha, repo) {
             const name = filepath.split('/').pop();
-            if (!confirm(`Mark "${name}" for deletion?\n\nNothing changes on GitHub yet.\nHit Save All → then Commit All to apply.`)) return;
+            if (!confirm(`Mark "${name}" for deletion?\n\nNothing changes on GitHub yet.\nHit Save All -> then Commit All to apply.`)) return;
             try {
                 const response = await fetch('/api/delete-file', {
                     method: 'POST',
@@ -1931,7 +1903,7 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(` Staged delete: ${filepath} — hit Commit All to push to GitHub`);
+                    addTerminalLine(` Staged delete: ${filepath} hit Commit All to push to GitHub`);
                     if (currentFilePath === filepath) {
                         currentFile = ''; currentFilePath = ''; currentRepo = ''; currentSha = '';
                         editor.setValue('');
@@ -1947,7 +1919,7 @@ $ </div>
         }
 
         async function confirmDeleteFolder(folderName, repo) {
-            if (!confirm(`Mark folder "${folderName}" and ALL its files for deletion?\n\nNothing changes on GitHub yet.\nHit Save All → then Commit All to apply.`)) return;
+            if (!confirm(`Mark folder "${folderName}" and ALL its files for deletion?\n\nNothing changes on GitHub yet.\nHit Save All -> then Commit All to apply.`)) return;
             addTerminalLine(`Staging folder ${folderName} for deletion...`);
             try {
                 const response = await fetch('/api/delete-folder', {
@@ -1957,7 +1929,7 @@ $ </div>
                 });
                 const data = await response.json();
                 if (data.success) {
-                    addTerminalLine(` Staged ${data.staged} files for deletion — hit Commit All to push to GitHub`);
+                    addTerminalLine(` Staged ${data.staged} files for deletion hit Commit All to push to GitHub`);
                     if (currentFilePath.startsWith(folderName + '/')) {
                         currentFile = ''; currentFilePath = ''; currentRepo = ''; currentSha = '';
                         editor.setValue('');
@@ -2024,7 +1996,7 @@ $ </div>
             let stagedCount = 0;
             for (const items of Object.values(pending)) stagedCount += items.length;
             if (stagedCount > 0) {
-                addTerminalLine(` ${stagedCount} deletion(s) staged — hit Commit All to push to GitHub`);
+                addTerminalLine(` ${stagedCount} deletion(s) staged hit Commit All to push to GitHub`);
                 savedAnything = true;
             }
 
@@ -2055,7 +2027,7 @@ $ </div>
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ repo: currentRepo })
                         }).then(r => r.json()).then(d => {
-                            if (d.success) addTerminalLine(` Lint triggered for ${currentRepo} — check Jenkins`);
+                            if (d.success) addTerminalLine(` Lint triggered for ${currentRepo} check Jenkins`);
                             else addTerminalLine(` Could not trigger lint: ${d.error}`);
                         }).catch(() => {});
                     } else {
@@ -2063,7 +2035,7 @@ $ </div>
                     }
                 } catch (e) { addTerminalLine(` Error: ${e.message}`); }
             } else if (currentFilePath && lastSavedPath !== currentFilePath) {
-                addTerminalLine(` ${currentFile} has unsaved changes — hit Save All first`);
+                addTerminalLine(` ${currentFile} has unsaved changes hit Save All first`);
             }
 
             const pending = await (await fetch('/api/pending-deletes')).json();
@@ -2091,7 +2063,6 @@ $ </div>
             if (fileContentWasPushed) { showPipelineModal(currentRepo); }
         }
 
-        // ─── Panel resizer ────────────────────────────────────────────────
         (function() {
             const resizer = document.getElementById('panel-resizer');
             const container = resizer ? resizer.closest('.main-container') : null;
@@ -2123,7 +2094,6 @@ $ </div>
             });
         })();
 
-        // ─── Row resizer ──────────────────────────────────────────────────
         (function() {
             const rowResizer = document.getElementById('row-resizer');
             const rightCol   = rowResizer ? rowResizer.closest('.right-col') : null;
@@ -2155,7 +2125,6 @@ $ </div>
             });
         })();
 
-        // ─── Box resizers ─────────────────────────────────────────────────
         document.querySelectorAll('.box-resizer').forEach(resizer => {
             const targetId = resizer.getAttribute('data-target');
             const box = targetId ? document.getElementById(targetId) : null;
@@ -2193,7 +2162,6 @@ $ </div>
         function goToDashboard() { window.location.href = 'http://localhost:8080'; }
         function checkPipelines() { window.location.href = 'http://localhost:7000'; }
         
-        // ─── Jenkins Pipeline Modal ───────────────────────────────────────
         let _pipelineRepo = null;
 
         async function showPipelineModal(repo, pendingContent) {
@@ -2260,7 +2228,7 @@ $ </div>
             try {
                 const res  = await fetch('/api/list-jenkins-jobs');
                 const data = await res.json();
-                select.innerHTML = '<option value="">— select existing job —</option>';
+                select.innerHTML = '<option value=""> select existing job </option>';
                 (data.jobs || []).forEach(j => {
                     const opt = document.createElement('option');
                     opt.value = j;
@@ -2287,7 +2255,6 @@ $ </div>
             status.style.color = '#94a3b8';
             addTerminalLine('Getting current build number before triggering...');
 
-            // Step 1: get build number BEFORE triggering
             let buildNumBefore = 0;
             try {
                 const preR = await fetch('/api/check-pipeline-result', {
@@ -2302,7 +2269,6 @@ $ </div>
                 addTerminalLine('Could not get pre-trigger build number: ' + e.message);
             }
 
-            // Step 2: trigger the pipeline
             status.textContent = 'Triggering ' + pipelineName + '...';
             addTerminalLine('Triggering pipeline: ' + pipelineName);
             try {
@@ -2318,19 +2284,18 @@ $ </div>
                     addTerminalLine('Failed to trigger pipeline: ' + data.error);
                     return;
                 }
-                addTerminalLine('Pipeline triggered — waiting 8 seconds for Jenkins to register build...');
-                status.textContent = 'Pipeline queued — waiting for Jenkins...';
+                addTerminalLine('Pipeline triggered waiting 8 seconds for Jenkins to register build...');
+                status.textContent = 'Pipeline queued waiting for Jenkins...';
                 await new Promise(r => setTimeout(r, 8000));
 
-                // Step 3: poll until new build number appears and completes
                 let polls = 0;
                 const pollPipeline = setInterval(async () => {
                     polls++;
                     if (polls > 40) {
                         clearInterval(pollPipeline);
                         status.style.color = '#ef4444';
-                        status.textContent = 'Pipeline timed out — push cancelled.';
-                        addTerminalLine('Pipeline timed out — push cancelled.');
+                        status.textContent = 'Pipeline timed out push cancelled.';
+                        addTerminalLine('Pipeline timed out push cancelled.');
                         return;
                     }
                     try {
@@ -2347,8 +2312,8 @@ $ </div>
                             clearInterval(pollPipeline);
                             if (pd.result === 'SUCCESS') {
                                 status.style.color = '#22c55e';
-                                status.textContent = 'Pipeline passed — pushing to GitHub...';
-                                addTerminalLine('Pipeline passed — pushing to GitHub...');
+                                status.textContent = 'Pipeline passed pushing to GitHub...';
+                                addTerminalLine('Pipeline passed pushing to GitHub...');
                                 closePipelineModal();
                                 if (_pendingPushContent !== null) {
                                     await doPush(_pendingPushContent);
@@ -2358,13 +2323,13 @@ $ </div>
                                 }
                             } else {
                                 status.style.color = '#ef4444';
-                                status.textContent = 'Pipeline FAILED — push blocked. Fix issues then retry.';
-                                addTerminalLine('Pipeline FAILED — push blocked. Fix issues then retry.');
+                                status.textContent = 'Pipeline FAILED push blocked. Fix issues then retry.';
+                                addTerminalLine('Pipeline FAILED push blocked. Fix issues then retry.');
                             }
                         } else if (!isNewBuild) {
                             addTerminalLine('Waiting for new build to start...');
                         } else {
-                            addTerminalLine('Build running — waiting for completion...');
+                            addTerminalLine('Build running waiting for completion...');
                         }
                     } catch(e) {
                         addTerminalLine('Poll error: ' + e.message);
@@ -2379,7 +2344,7 @@ $ </div>
 
         function cancelPush() {
             closePipelineModal();
-            addTerminalLine('Push cancelled — run the pipeline first before pushing to GitHub.');
+            addTerminalLine('Push cancelled run the pipeline first before pushing to GitHub.');
         }
 
         function closePipelineModal() {
@@ -2442,7 +2407,6 @@ $ </div>
         }
     </script>
 
-        <!-- ── Jenkins Pipeline Modal ───────────────────────────────── -->
         <div id="pipeline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
             <div style="background:#383838;border:1px solid #3b82f6;border-radius:12px;padding:30px;width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                 <h3 style="color:#60a5fa;margin-bottom:6px;font-size:18px;">Link Jenkins Pipeline</h3>
@@ -2461,10 +2425,10 @@ $ </div>
                         style="width:100%;background:#2a2a2a;border:1px solid #334155;border-radius:6px;
                                padding:8px 12px;color:#e2e8f0;font-size:14px;margin-bottom:14px;"
                         onchange="onExistingSelect()">
-                        <option value="">— select existing job —</option>
+                        <option value=""> select existing job</option>
                     </select>
 
-                    <div style="text-align:center;color:#475569;font-size:12px;margin-bottom:12px;">— or create a new one —</div>
+                    <div style="text-align:center;color:#475569;font-size:12px;margin-bottom:12px;"> or create a new one </div>
 
                     <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">New pipeline name:</label>
                     <input id="pipeline-name-input" type="text" placeholder="e.g. my-pipeline"
@@ -2523,7 +2487,6 @@ def create_file():
 @app.route('/api/open-in-vscode-git', methods=['POST'])
 def open_in_vscode_git():
     data = request.json
-    filename = data.get('filename', '')
     filepath = data.get('filepath', '')
     repo     = data.get('repo', '')
     if not repo:
@@ -2567,7 +2530,6 @@ def list_github_repos():
 
 
 def setup_branch_protection(token, owner, repo):
-    """Automatically set up branch protection when a repo is added"""
     import urllib.request
     try:
         url = f'https://api.github.com/repos/{owner}/{repo}/branches/main/protection'
@@ -2916,7 +2878,6 @@ def trigger_lint():
                 headers[crumb_data['crumbRequestField']] = crumb_data['crumb']
         except Exception:
             pass
-        # Get token for this repo
         token = ''
         repos = load_repos_from_file()
         for r in repos:
@@ -2938,7 +2899,6 @@ def trigger_lint():
 
 @app.route('/api/pre-push-lint', methods=['POST'])
 def pre_push_lint():
-    """Run flake8 locally on file content before pushing to GitHub"""
     import subprocess, tempfile, os
     data = request.get_json(force=True)
     content = data.get('content', '')
@@ -3063,7 +3023,6 @@ def link_pipeline():
         action = 'Created and linked' if create_new else 'Linked'
         return jsonify({'success': True, 'message': f'{action} pipeline "{job_name}" to {repo}. You can now edit the script in Jenkins.'})
     except Exception as e:
-        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
@@ -3076,12 +3035,6 @@ if __name__ == '__main__':
     print("Access: http://localhost:6001")
     print(f"Repos:  {REPOS_FILE}")
     print(f"Clones: {CLONES_DIR}")
-    print("")
-    print("Features:")
-    print("  - Empty folders (uses hidden .gitkeep)")
-    print("  - Folder + file creation in one step")
-    print("  - Drag handles on all file items")
-    print("  - Collapsible folder structure")
     print("")
     print("Press Ctrl+C to stop")
     print("="*60)

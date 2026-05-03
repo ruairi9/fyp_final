@@ -15,11 +15,11 @@ pipeline {
         stage('Build') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — SETUP'
+                echo ' STAGE 1 SETUP'
                 echo ' Installing lint tools'
                 echo '============================================'
                 sh '''
-                    echo "Lint Report — $(date)" > $REPORT_FILE
+                    echo "Lint Report $(date)" > $REPORT_FILE
                     echo "Repo: ${REPO:-dashboard files}" >> $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
@@ -37,7 +37,7 @@ pipeline {
         stage('Test') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — LINT PYTHON FILES'
+                echo ' STAGE 2 LINT PYTHON FILES'
                 echo ' Running flake8'
                 echo '============================================'
                 sh '''
@@ -47,7 +47,6 @@ pipeline {
                     echo "" >> $REPORT_FILE
                     echo "=== PYTHON FILE LINT ===" >> $REPORT_FILE
 
-                    # If a repo was passed — clone and lint it
                     if [ -n "${REPO}" ]; then
                         echo "Cloning ${REPO}..."
                         rm -rf /tmp/lint-repo
@@ -67,25 +66,23 @@ pipeline {
                         echo "Linting files in ${REPO}..."
                         LINT_DIR=/tmp/lint-repo
                     else
-                        echo "No repo specified — linting dashboard files"
+                        echo "No repo specified linting dashboard files"
                         LINT_DIR=/home/ruairi/fyp-cluster/sdos-dashboard
                     fi
 
-                    # Find all Python files and lint them
-                    # Use for loop not while read to keep FAIL counter in same shell
                     for FILEPATH in $(find $LINT_DIR -name "*.py" -not -path "*/__pycache__/*" -not -path "*/.git/*" | sort); do
                         FILE=$(basename $FILEPATH)
                         echo "Linting $FILE..."
                         echo "--- $FILE ---" >> $REPORT_FILE
                         OUTPUT=$(python3 -m flake8 "$FILEPATH" --max-line-length=120 --ignore=E501,W503 2>&1 || true)
                         if [ -z "$OUTPUT" ]; then
-                            echo "PASS: $FILE — no issues"
+                            echo "PASS: $FILE no issues"
                             echo "PASS: No issues found" >> $REPORT_FILE
                             PASS=$((PASS+1))
                         else
                             COUNT=$(echo "$OUTPUT" | wc -l)
                             echo "$OUTPUT" >> $REPORT_FILE
-                            echo "FAIL: $FILE — $COUNT issue(s) found"
+                            echo "FAIL: $FILE $COUNT issue(s) found"
                             echo "FAIL: $COUNT issue(s) found" >> $REPORT_FILE
                             FAIL=$((FAIL+1))
                         fi
@@ -107,7 +104,7 @@ pipeline {
         stage('Staging') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — LINT JENKINSFILES'
+                echo ' STAGE 3 LINT JENKINSFILES'
                 echo ' Checking pipeline files exist'
                 echo '============================================'
                 sh '''
@@ -141,7 +138,7 @@ pipeline {
         stage('Load') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — PYTHON SYNTAX CHECK'
+                echo ' STAGE 4 PYTHON SYNTAX CHECK'
                 echo ' Checking all dashboard files compile'
                 echo '============================================'
                 sh '''
@@ -154,12 +151,12 @@ pipeline {
                         FILEPATH="/home/ruairi/fyp-cluster/sdos-dashboard/$FILE"
                         if [ -f "$FILEPATH" ]; then
                             if python3 -m py_compile "$FILEPATH" 2>/dev/null; then
-                                echo "PASS: $FILE — syntax OK"
-                                echo "PASS: $FILE — syntax OK" >> $REPORT_FILE
+                                echo "PASS: $FILE syntax OK"
+                                echo "PASS: $FILE syntax OK" >> $REPORT_FILE
                                 PASS=$((PASS+1))
                             else
-                                echo "FAIL: $FILE — syntax error"
-                                echo "FAIL: $FILE — syntax error" >> $REPORT_FILE
+                                echo "FAIL: $FILE syntax error"
+                                echo "FAIL: $FILE syntax error" >> $REPORT_FILE
                                 FAIL=$((FAIL+1))
                             fi
                         fi
@@ -176,16 +173,16 @@ pipeline {
         stage('Production') {
             steps {
                 echo '============================================'
-                echo ' STAGE 5 — FINAL REPORT'
+                echo ' STAGE 5 FINAL REPORT'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== LINT COMPLETE: $(date) ===" >> $REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║           LINT REPORT                  ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "LINT REPORT"
+                    echo '============================================'
                     cat $REPORT_FILE
 
                     LINT_FAILS=$(cat /tmp/lint_fail_count 2>/dev/null | tr -d '[:space:]' || echo 0)
@@ -196,10 +193,10 @@ pipeline {
 
                     if [ "$LINT_FAILS" -gt "0" ] || [ "$SYNTAX_FAILS" -gt "0" ]; then
                         echo ""
-                        echo "PIPELINE FAILED — fix lint and syntax issues above"
+                        echo "PIPELINE FAILED fix lint and syntax issues above"
                         exit 1
                     fi
-                    echo "PIPELINE PASSED — all checks clean"
+                    echo "PIPELINE PASSED all checks clean"
                 '''
                 archiveArtifacts artifacts: 'lint-report.txt', fingerprint: true
             }
@@ -207,7 +204,7 @@ pipeline {
     }
 
     post {
-        success { echo 'Lint checks complete — check lint-report.txt in artifacts' }
-        failure { echo 'Lint failed — check the logs above' }
+        success { echo 'Lint checks complete check lint-report.txt in artifacts' }
+        failure { echo 'Lint failed check the logs above' }
     }
 }

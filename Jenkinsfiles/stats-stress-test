@@ -15,30 +15,30 @@ pipeline {
         stage('Before') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — BEFORE SNAPSHOT'
+                echo ' STAGE 1 BEFORE SNAPSHOT'
                 echo ' Recording all stats before stress'
                 echo '============================================'
                 sh '''
-                    echo "SDOS Stats Stress Test — $(date)" > $WORKSPACE/$REPORT_FILE
+                    echo "SDOS Stats Stress Test $(date)" > $WORKSPACE/$REPORT_FILE
                     echo "============================================" >> $WORKSPACE/$REPORT_FILE
 
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST RAM ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS HOST RAM ===" >> $WORKSPACE/$REPORT_FILE
                     free -m | awk 'NR==2{print "Total RAM Usage:   " sprintf("%.1f", ($3/$2)*100) "%"; print "Available Memory:  " sprintf("%.1f", ($7/$2)*100) "%"}' >> $WORKSPACE/$REPORT_FILE
                     free -m | awk 'NR==3{if ($2>0) print "Swap Usage:        " sprintf("%.1f", ($3/$2)*100) "%"; else print "Swap Usage:        0%"}' >> $WORKSPACE/$REPORT_FILE
                     awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{print "Page Faults Total: " int((pf+pmf)/1000)}' /proc/vmstat >> $WORKSPACE/$REPORT_FILE
                     awk '/oom_kill/{print "OOM Events:        "$2}' /proc/vmstat >> $WORKSPACE/$REPORT_FILE
 
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST CPU ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS HOST CPU ===" >> $WORKSPACE/$REPORT_FILE
                     mpstat 1 1 | awk '/Average/{print "CPU Utilisation:   " sprintf("%.1f", 100-$NF) "%"; print "CPU Steal Time:    " sprintf("%.1f", $9) "%"; print "I/O Waits:         " sprintf("%.1f", $6) "%"}' >> $WORKSPACE/$REPORT_FILE
 
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== BEFORE STRESS — HOST DISK ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS HOST DISK ===" >> $WORKSPACE/$REPORT_FILE
                     iostat -x 1 1 | awk '/^nvme/{print "I/O Throughput:    " sprintf("%.2f", ($3+$9)/1024) " MB/s"; print "Disk IOPS:         " sprintf("%.1f", $2+$8) "/sec"; print "Disk Latency:      " sprintf("%.2f", $6) " ms"}' >> $WORKSPACE/$REPORT_FILE
 
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== BEFORE STRESS — VMs ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "=== BEFORE STRESS VMs ===" >> $WORKSPACE/$REPORT_FILE
                     cd $VAGRANT_DIR
                     cat > /tmp/vm_stats.sh << 'EOF'
 #!/bin/bash
@@ -71,7 +71,7 @@ EOF
         stage('Stress') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — STRESS TEST'
+                echo ' STAGE 2 STRESS TEST'
                 echo ' Running CPU and RAM stress on all VMs'
                 echo '============================================'
                 sh '''
@@ -101,7 +101,7 @@ EOF
                     sleep 30
 
                     echo "" >> $REPORT_FILE
-                    echo "=== DURING STRESS — HOST ===" >> $REPORT_FILE
+                    echo "=== DURING STRESS HOST ===" >> $REPORT_FILE
                     free -m | awk 'NR==2{print "RAM During Stress: " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
                     mpstat 1 1 | awk '/Average/{print "CPU During Stress: " sprintf("%.1f", 100-$NF) "%"}' >> $REPORT_FILE
 
@@ -114,17 +114,17 @@ EOF
         stage('After') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — AFTER SNAPSHOT'
+                echo ' STAGE 3 AFTER SNAPSHOT'
                 echo ' Recording stats after stress'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
-                    echo "=== AFTER STRESS — HOST ===" >> $REPORT_FILE
+                    echo "=== AFTER STRESS HOST ===" >> $REPORT_FILE
                     free -m | awk 'NR==2{print "Total RAM After:   " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
                     mpstat 1 1 | awk '/Average/{print "CPU After Stress:  " sprintf("%.1f", 100-$NF) "%"}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
-                    echo "=== AFTER STRESS — VMs ===" >> $REPORT_FILE
+                    echo "=== AFTER STRESS VMs ===" >> $REPORT_FILE
                     cd $VAGRANT_DIR
                     cat > /tmp/vm_stats.sh << 'EOF'
 #!/bin/bash
@@ -151,7 +151,7 @@ EOF
         stage('Recovery') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — RECOVERY CHECK'
+                echo ' STAGE 4 RECOVERY CHECK'
                 echo ' Verifying cluster recovered after stress'
                 echo '============================================'
                 sh '''
@@ -160,29 +160,27 @@ EOF
 
                     sleep 10
 
-                    # Check all pods still running
                     TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
                     RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | grep -c Running || echo 0)
                     echo "Total pods: $TOTAL" >> $REPORT_FILE
                     echo "Running pods: $RUNNING" >> $REPORT_FILE
 
                     if [ "$RUNNING" -gt "0" ]; then
-                        echo "PASS: Cluster recovered — $RUNNING pods running" >> $REPORT_FILE
-                        echo "PASS: Cluster recovered — $RUNNING pods running"
+                        echo "PASS: Cluster recovered $RUNNING pods running" >> $REPORT_FILE
+                        echo "PASS: Cluster recovered $RUNNING pods running"
                     else
                         echo "WARN: No running pods detected after stress" >> $REPORT_FILE
                     fi
 
-                    # Host RAM after recovery
                     free -m | awk 'NR==2{print "RAM After Recovery: " sprintf("%.1f", ($3/$2)*100) "%"}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
                     echo "=== STRESS TEST COMPLETE: $(date) ===" >> $REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║       STRESS TEST REPORT               ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "STRESS TEST REPORT"
+                    echo '============================================'
                     cat $WORKSPACE/$REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'stats-stress-report.txt', fingerprint: true
@@ -201,7 +199,7 @@ EOF
                 echo "All VMs cleaned up"
             '''
         }
-        success { echo 'Stress test complete — check stats-stress-report.txt in artifacts' }
-        failure { echo 'Stress test failed — all stress processes cleaned up' }
+        success { echo 'Stress test complete check stats-stress-report.txt in artifacts' }
+        failure { echo 'Stress test failed all stress processes cleaned up' }
     }
 }

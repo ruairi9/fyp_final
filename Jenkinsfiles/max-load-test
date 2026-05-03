@@ -15,7 +15,7 @@ pipeline {
         stage('Build') {
             steps {
                 echo '============================================'
-                echo ' SDOS MAX LOAD TEST — All 5 VMs'
+                echo ' SDOS MAX LOAD TEST All 5 VMs'
                 echo ' Target: 80% CPU + 75% RAM'
                 echo ' Safety cut-off: CPU>85% or RAM>80%'
                 echo '============================================'
@@ -26,7 +26,6 @@ pipeline {
                     echo "Duration: \${TEST_DURATION}s per stage" >> \$WORKSPACE/\$REPORT_FILE
                     echo "============================================" >> \$WORKSPACE/\$REPORT_FILE
 
-                    # Write metric collection script
                     cat > /tmp/vm_metrics.sh << 'METRICS'
 #!/bin/bash
 echo "CPU:  \$(top -bn2 | grep "%Cpu" | tail -1)"
@@ -47,10 +46,10 @@ METRICS
                         echo "\$VM: \$STATUS"
                         RAM=\$(vagrant ssh \$VM -c "bash -s" < /tmp/vm_metrics.sh 2>/dev/null | grep "RAM:" | awk '{print \$2}' | tr -d '%' | cut -d. -f1 || echo "0")
                         if [ "\$RAM" -gt "75" ] 2>/dev/null; then
-                            echo "ABORT: \$VM RAM at \${RAM}% — too high" >> \$WORKSPACE/\$REPORT_FILE
+                            echo "ABORT: \$VM RAM at \${RAM}% too high" >> \$WORKSPACE/\$REPORT_FILE
                             exit 1
                         fi
-                        echo "\$VM pre-check RAM: \${RAM}% — OK" >> \$WORKSPACE/\$REPORT_FILE
+                        echo "\$VM pre-check RAM: \${RAM}% OK" >> \$WORKSPACE/\$REPORT_FILE
                     done
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
@@ -64,7 +63,7 @@ METRICS
 
         stage('Test') {
             steps {
-                echo 'Stage 2 — Baseline + CPU stress 80%'
+                echo 'Stage 2 Baseline + CPU stress 80%'
                 sh """
                     cd \$VAGRANT_DIR
                     echo "" >> \$WORKSPACE/\$REPORT_FILE
@@ -79,20 +78,17 @@ METRICS
                     echo "" >> \$WORKSPACE/\$REPORT_FILE
                     echo "=== CPU STRESS 80% (per VM) ===" >> \$WORKSPACE/\$REPORT_FILE
 
-                    # Write stress script to each VM then run it
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh \$VM -c "printf '#!/bin/sh\\nstress-ng --cpu 2 --cpu-method matrixprod --io 4 --vm 1 --vm-bytes 50%% --cache 2 --timeout 120s > /tmp/stress.log 2>&1\\n' > /tmp/run_stress.sh; chmod +x /tmp/run_stress.sh; nohup /tmp/run_stress.sh > /dev/null 2>&1 &" 2>/dev/null
                     done
                     echo "Stress started on all VMs - waiting 40s for peak..."
                     sleep 40
 
-                    # Capture all VMs simultaneously
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh \$VM -c "bash -s" < /tmp/vm_metrics.sh 2>/dev/null | grep -v fog | grep -v WARNING > /tmp/cpu_peak_\${VM}.txt &
                     done
                     wait
 
-                    # Write to report
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         echo "--- \$VM CPU peak ---" >> \$WORKSPACE/\$REPORT_FILE
                         cat /tmp/cpu_peak_\${VM}.txt >> \$WORKSPACE/\$REPORT_FILE 2>/dev/null || true
@@ -105,7 +101,7 @@ METRICS
 
         stage('Staging') {
             steps {
-                echo 'Stage 3 — RAM stress 75%'
+                echo 'Stage 3 RAM stress 75%'
                 sh """
                     cd \$VAGRANT_DIR
                     echo "" >> \$WORKSPACE/\$REPORT_FILE
@@ -121,7 +117,7 @@ METRICS
                         RAM=\$(vagrant ssh \$VM -c "free -m | grep Mem | awk '{printf \"%.0f\", \$3/\$2*100}'" 2>/dev/null | tail -1 || echo "0")
                         echo "\$VM RAM: \${RAM}%"
                         if [ "\$RAM" -gt "\$SAFETY_RAM" ] 2>/dev/null; then
-                            echo "SAFETY TRIGGERED: \$VM RAM at \${RAM}% — killing stress!"
+                            echo "SAFETY TRIGGERED: \$VM RAM at \${RAM}% killing stress!"
                             vagrant ssh \$VM -c "sudo pkill -9 -f stress-ng 2>/dev/null; true" 2>/dev/null || true
                         fi
                     done
@@ -139,7 +135,7 @@ METRICS
 
         stage('Load') {
             steps {
-                echo 'Stage 4 — Combined 80% CPU + 70% RAM'
+                echo 'Stage 4 Combined 80% CPU + 70% RAM'
                 sh """
                     cd \$VAGRANT_DIR
                     echo "" >> \$WORKSPACE/\$REPORT_FILE
@@ -152,13 +148,11 @@ METRICS
                     echo "Combined stress started on all VMs - waiting 40s for peak..."
                     sleep 40
 
-                    # Capture all VMs simultaneously
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh \$VM -c "bash -s" < /tmp/vm_metrics.sh 2>/dev/null | grep -v fog | grep -v WARNING > /tmp/combined_peak_\${VM}.txt &
                     done
                     wait
 
-                    # Write to report
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         echo "--- \$VM combined peak ---" >> \$WORKSPACE/\$REPORT_FILE
                         cat /tmp/combined_peak_\${VM}.txt >> \$WORKSPACE/\$REPORT_FILE 2>/dev/null || true
@@ -171,7 +165,7 @@ METRICS
 
         stage('Production') {
             steps {
-                echo 'Stage 5 — Cleanup and Recovery'
+                echo 'Stage 5 Cleanup and Recovery'
                 sh """
                     cd \$VAGRANT_DIR
 
@@ -207,8 +201,8 @@ METRICS
                     echo "Running pods: \$RUNNING" >> \$WORKSPACE/\$REPORT_FILE
 
                     if [ "\$RUNNING" -gt "18" ]; then
-                        echo "PASS: Cluster healthy — \$RUNNING pods running" >> \$WORKSPACE/\$REPORT_FILE
-                        echo "PASS: Cluster healthy — \$RUNNING pods running"
+                        echo "PASS: Cluster healthy \$RUNNING pods running" >> \$WORKSPACE/\$REPORT_FILE
+                        echo "PASS: Cluster healthy \$RUNNING pods running"
                     else
                         echo "WARN: Only \$RUNNING pods running after stress!" >> \$WORKSPACE/\$REPORT_FILE
                     fi
@@ -234,7 +228,7 @@ METRICS
                 echo "All VMs cleaned up"
             """
         }
-        success { echo 'Max load test completed — check max-load-report.txt' }
-        failure { echo 'Max load test failed — all stress processes cleaned up' }
+        success { echo 'Max load test completed check max-load-report.txt' }
+        failure { echo 'Max load test failed all stress processes cleaned up' }
     }
 }

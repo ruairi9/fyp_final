@@ -12,15 +12,15 @@ pipeline {
         stage('Host Stats') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — HOST MACHINE STATS'
+                echo ' STAGE 1 HOST MACHINE STATS'
                 echo ' Capturing all dashboard values from host'
                 echo '============================================'
                 sh '''
-                    echo "SDOS Stats Snapshot — $(date)" > $REPORT_FILE
+                    echo "SDOS Stats Snapshot $(date)" > $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
-                    echo "=== HOST — RAM STATUS ===" >> $REPORT_FILE
+                    echo "=== HOST RAM STATUS ===" >> $REPORT_FILE
                     free -m | awk 'NR==2{print "Total RAM Usage:   " sprintf("%.1f", ($3/$2)*100) "%"; print "Available Memory:  " sprintf("%.1f", ($7/$2)*100) "%"}' >> $REPORT_FILE
                     free -m | awk 'NR==3{if ($2>0) print "Swap Usage:        " sprintf("%.1f", ($3/$2)*100) "%"; else print "Swap Usage:        0%"}' >> $REPORT_FILE
                     awk '/^pgfault /{pf=$2} /^pgmajfault /{pmf=$2} END{print "Page Faults Total: " int((pf+pmf)/1000)}' /proc/vmstat >> $REPORT_FILE
@@ -28,11 +28,11 @@ pipeline {
                     perf stat -e cache-misses -a sleep 0.1 2>&1 | awk '/cache-misses/{gsub(",","",$1); print "Cache Faults:      " int($1/1000)}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
-                    echo "=== HOST — CPU STATUS ===" >> $REPORT_FILE
+                    echo "=== HOST CPU STATUS ===" >> $REPORT_FILE
                     mpstat 1 1 | awk '/Average/{print "CPU Utilisation:   " sprintf("%.1f", 100-$NF) "%"; print "CPU Steal Time:    " sprintf("%.1f", $9) "%"; print "I/O Waits:         " sprintf("%.1f", $6) "%"}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
-                    echo "=== HOST — DISK & STORAGE ===" >> $REPORT_FILE
+                    echo "=== HOST DISK & STORAGE ===" >> $REPORT_FILE
                     iostat -x 1 1 | awk '/^nvme/{print "I/O Throughput:    " sprintf("%.2f", ($3+$9)/1024) " MB/s"; print "Disk IOPS:         " sprintf("%.1f", $2+$8) "/sec"; print "Disk Latency:      " sprintf("%.2f", $6) " ms"}' >> $REPORT_FILE
 
                     echo "" >> $REPORT_FILE
@@ -48,7 +48,7 @@ pipeline {
         stage('VM Stats') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — VM LIST STATS'
+                echo ' STAGE 2 VM LIST STATS'
                 echo ' Capturing stats from all 5 VMs'
                 echo '============================================'
                 sh '''
@@ -57,8 +57,6 @@ pipeline {
                     echo "" >> $REPORT_FILE
                     echo "=== VM LIST ===" >> $REPORT_FILE
 
-                    # Write a helper script to the VM and run it
-                    # This avoids ALL escaping issues
                     cat > /tmp/vm_stats.sh << 'EOF'
 #!/bin/bash
 CPU=$(awk '/^cpu /{u=($2+$4)*100/($2+$4+$5)} END{printf "%.1f", u}' /proc/stat)
@@ -79,7 +77,6 @@ EOF
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         echo "--- $VM ---" >> $REPORT_FILE
 
-                        # Copy script to VM and run it
                         vagrant ssh $VM -c "bash -s" < /tmp/vm_stats.sh 2>/dev/null \
                             | grep -v fog | grep -v WARNING >> $REPORT_FILE || true
 
@@ -92,9 +89,9 @@ EOF
                     echo "=== SNAPSHOT COMPLETE: $(date) ===" >> $REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║         STATS SNAPSHOT REPORT          ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "STATS SNAPSHOT REPORT"
+                    echo '============================================'
                     cat $REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'stats-snapshot-report.txt', fingerprint: true
@@ -103,7 +100,7 @@ EOF
     }
 
     post {
-        success { echo 'Snapshot complete — check stats-snapshot-report.txt in artifacts' }
+        success { echo 'Snapshot complete check stats-snapshot-report.txt in artifacts' }
         failure { echo 'Snapshot failed' }
     }
 }

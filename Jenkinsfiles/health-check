@@ -14,11 +14,11 @@ pipeline {
         stage('VMs') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — VM HEALTH'
+                echo ' STAGE 1 VM HEALTH'
                 echo ' Checking all 5 VMs are reachable'
                 echo '============================================'
                 sh '''
-                    echo "Health Check Report — $(date)" > $REPORT_FILE
+                    echo "Health Check Report $(date)" > $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
                     PASS=0
@@ -29,7 +29,6 @@ pipeline {
                     echo "=== VM HEALTH ===" >> $REPORT_FILE
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        # Retry logic — try 3 times before failing
                         SUCCESS=0
                         for i in 1 2 3; do
                             STATUS=$(vagrant ssh $VM -c "echo OK" 2>/dev/null | grep -c OK || echo 0)
@@ -69,7 +68,7 @@ pipeline {
         stage('Pods') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — POD HEALTH'
+                echo ' STAGE 2 POD HEALTH'
                 echo ' Checking all pods are Running'
                 echo '============================================'
                 sh '''
@@ -128,7 +127,7 @@ pipeline {
         stage('Nodes') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — NODE HEALTH + CPU/MEMORY'
+                echo ' STAGE 3 NODE HEALTH + CPU/MEMORY'
                 echo ' Checking all K3s nodes are Ready'
                 echo ' Checking CPU and Memory usage'
                 echo '============================================'
@@ -162,21 +161,19 @@ pipeline {
                     METRICS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n kube-system                         --no-headers 2>/dev/null | grep metrics-server | grep -c Running || true)
                     [ -z "$METRICS" ] && METRICS=0
                     if [ "$METRICS" -lt "1" ] 2>/dev/null; then
-                        echo "WARN: metrics-server not running — skipping CPU/memory check"
+                        echo "WARN: metrics-server not running skipping CPU/memory check"
                         echo "WARN: metrics-server not running" >> $REPORT_FILE
                     else
                         echo "PASS: metrics-server is running"
                         echo "PASS: metrics-server running" >> $REPORT_FILE
                     fi
 
-                    # Retry logic for kubectl top
                     for i in 1 2 3; do
                         TOP_OUTPUT=$(kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null)
                         if [ -n "$TOP_OUTPUT" ]; then
                             echo "$TOP_OUTPUT"
                             echo "$TOP_OUTPUT" >> $REPORT_FILE
 
-                            # Check for high CPU or memory
                             echo "$TOP_OUTPUT" | tail -n +2 | while read line; do
                                 NODE=$(echo $line | awk '{print $1}')
                                 CPU=$(echo $line | awk '{print $3}' | tr -d '%')
@@ -184,10 +181,10 @@ pipeline {
                                 CPU=${CPU:-0}
                                 MEM=${MEM:-0}
                                 if [ "$CPU" -gt "80" ] 2>/dev/null; then
-                                    echo "WARN: $NODE CPU at ${CPU}% — high"
+                                    echo "WARN: $NODE CPU at ${CPU}% high"
                                 fi
                                 if [ "$MEM" -gt "80" ] 2>/dev/null; then
-                                    echo "WARN: $NODE Memory at ${MEM}% — high"
+                                    echo "WARN: $NODE Memory at ${MEM}% high"
                                 fi
                             done
                             break
@@ -210,7 +207,7 @@ pipeline {
         stage('Services') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — SERVICE HEALTH'
+                echo ' STAGE 4 SERVICE HEALTH'
                 echo ' Checking Jenkins and Registry are up'
                 echo '============================================'
                 sh '''
@@ -219,7 +216,6 @@ pipeline {
                     PASS=0
                     FAIL=0
 
-                    # Check Jenkins — retry 3 times
                     for i in 1 2 3; do
                         JENKINS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                             $JENKINS_URL --connect-timeout 5 || echo "000")
@@ -238,7 +234,6 @@ pipeline {
                         FAIL=$((FAIL+1))
                     fi
 
-                    # Check Registry
                     REGISTRY_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                         $REGISTRY/v2/ --connect-timeout 5 || echo "000")
                     if [ "$REGISTRY_CODE" = "200" ] || [ "$REGISTRY_CODE" = "401" ]; then
@@ -251,7 +246,6 @@ pipeline {
                         FAIL=$((FAIL+1))
                     fi
 
-                    # Check Grafana
                     GRAFANA_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                         http://192.168.121.50:32030 --connect-timeout 5 || echo "000")
                     if [ "$GRAFANA_CODE" = "200" ] || [ "$GRAFANA_CODE" = "302" ]; then
@@ -279,7 +273,7 @@ pipeline {
         stage('Resources') {
             steps {
                 echo '============================================'
-                echo ' STAGE 5 — RESOURCE HEALTH'
+                echo ' STAGE 5 RESOURCE HEALTH'
                 echo ' Checking disk space on all VMs'
                 echo '============================================'
                 sh '''
@@ -296,7 +290,7 @@ pipeline {
                         [ -z "$DISK" ] && DISK=0
 
                         if [ "$DISK" -gt "90" ] 2>/dev/null; then
-                            echo "WARN: $VM disk at ${DISK}% — getting full"
+                            echo "WARN: $VM disk at ${DISK}% getting full"
                             echo "WARN: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
                             FAIL=$((FAIL+1))
                         else
@@ -305,11 +299,10 @@ pipeline {
                         fi
                     done
 
-                    # Check host disk
                     HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
                     HOST_DISK=${HOST_DISK:-0}
                     if [ "$HOST_DISK" -gt "95" ] 2>/dev/null; then
-                        echo "FAIL: Host disk critically full at ${HOST_DISK}% — pipeline blocked"
+                        echo "FAIL: Host disk critically full at ${HOST_DISK}% pipeline blocked"
                         echo "FAIL: Host disk critically full ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
                         exit 1
                     else
@@ -321,9 +314,9 @@ pipeline {
                     echo "=== HEALTH CHECK COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║         HEALTH CHECK REPORT            ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo "============================================"
+                    echo "HEALTH CHECK REPORT"
+                    echo "============================================"
                     cat $WORKSPACE/$REPORT_FILE
 
                     echo "============================================"
@@ -343,7 +336,7 @@ pipeline {
     }
 
     post {
-        success { echo 'HEALTH CHECK PASSED — cluster is healthy' }
-        failure { echo 'HEALTH CHECK FAILED — check the logs above' }
+        success { echo 'HEALTH CHECK PASSED cluster is healthy' }
+        failure { echo 'HEALTH CHECK FAILED check the logs above' }
     }
 }

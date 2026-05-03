@@ -47,7 +47,6 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def get_real_node_metrics():
-    """Get CPU and RAM from each VM via vagrant ssh — matches server_dashboard VM LIST values"""
     vagrant_map = get_node_names_to_vagrant()
     metrics = {}
     for k8s_name, vagrant_name in vagrant_map.items():
@@ -379,7 +378,6 @@ DASHBOARD_TEMPLATE = """
             }
             const width=300,height=180,pL=50,pR=10,pT=30,pB=30;
             const gW=width-pL-pR, gH=height-pT-pB;
-            // Cap data at 100 if requested
             const cappedData = capAt100 ? data.map(v => Math.min(100, v)) : data;
             const maxV=Math.max(...cappedData), minV=Math.min(...cappedData), range=maxV-minV;
             let dMin,dMax;

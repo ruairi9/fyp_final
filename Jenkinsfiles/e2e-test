@@ -16,11 +16,11 @@ pipeline {
         stage('Build') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — BUILD'
+                echo ' STAGE 1 BUILD'
                 echo ' Building Flask backend Docker image'
                 echo '============================================'
                 sh '''
-                    echo "E2E Integration Test Report — $(date)" > $REPORT_FILE
+                    echo "E2E Integration Test Report $(date)" > $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
                     mkdir -p /tmp/sdos-e2e/backend
 
@@ -86,14 +86,13 @@ EOF
         stage('Deploy') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — DEPLOY'
+                echo ' STAGE 2 DEPLOY'
                 echo ' Deploying Flask backend + nginx frontend'
                 echo ' to the integration namespace'
                 echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG create namespace $NAMESPACE --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
 
-                    # Clean up any leftover deployments from previous runs
                     kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend  -n $NAMESPACE --ignore-not-found=true || true
                     kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend -n $NAMESPACE --ignore-not-found=true || true
                     kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod         -n $NAMESPACE --ignore-not-found=true || true
@@ -238,7 +237,6 @@ spec:
     nodePort: 30091
 EOF
 
-                    # Create image pull secret so worker nodes can pull from private registry
                     kubectl --kubeconfig=$KUBECONFIG create secret docker-registry registry-creds \
                         --docker-server=$REGISTRY \
                         --docker-username=admin \
@@ -265,7 +263,7 @@ EOF
         stage('Integration Tests') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — INTEGRATION TESTS'
+                echo ' STAGE 3 INTEGRATION TESTS'
                 echo ' Test pod runs inside the cluster'
                 echo ' Tests the full frontend → backend chain'
                 echo '============================================'
@@ -377,7 +375,6 @@ EOF
                             fi
                         '
 
-                    # Wait for pod to complete (not just Ready - it runs and exits)
                     kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Succeeded --timeout=120s 2>/dev/null ||                     kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Failed --timeout=120s 2>/dev/null || true
                     kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null || true
 

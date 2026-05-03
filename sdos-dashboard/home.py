@@ -48,7 +48,6 @@ HOME_TEMPLATE = '''
             flex-direction: column;
         }
 
-        /* Header */
         .header {
             background: #3a3a3a;
             color: white;
@@ -70,7 +69,6 @@ HOME_TEMPLATE = '''
         }
         .header-top { display: flex; align-items: center; }
 
-        /* Main content */
         .main {
             flex: 1;
             padding: 40px;
@@ -79,7 +77,6 @@ HOME_TEMPLATE = '''
             width: 100%;
         }
 
-        /* Dashboard grid */
         .cards {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -113,7 +110,6 @@ HOME_TEMPLATE = '''
             font-weight: 400;
         }
 
-        /* Login wall */
         #login-wall {
             max-width: 440px;
             margin: 40px auto;
@@ -179,7 +175,6 @@ HOME_TEMPLATE = '''
             margin-top: 12px;
         }
 
-        /* Logout button */
         #logout-btn {
             background: #cc0000;
             color: white;
@@ -193,7 +188,6 @@ HOME_TEMPLATE = '''
         }
         #logout-btn:hover { background: #aa0000; }
 
-        /* Footer */
         .footer {
             background: #3a3a3a;
             color: #aaa;
@@ -220,7 +214,6 @@ HOME_TEMPLATE = '''
 
     <div class="main">
 
-        <!-- Login wall -->
         <div id="login-wall">
             <h2>Login to SDOS</h2>
             <p>Enter your credentials to access the SDOS dashboards</p>
@@ -243,10 +236,9 @@ HOME_TEMPLATE = '''
 
             <button class="lw-btn" onclick="doLogin()">Login</button>
             <div id="lw-error"></div>
-            <div id="lw-spinner">Logging in — this may take up to 30 seconds...</div>
+            <div id="lw-spinner">Logging in this may take up to 30 seconds...</div>
         </div>
 
-        <!-- Dashboard cards -->
         <div id="dashboard-cards" style="display:none;">
             <div class="cards">
                 <a href="http://localhost:8080" class="card">
@@ -271,7 +263,7 @@ HOME_TEMPLATE = '''
     </div>
 
     <div class="footer">
-        SDOS Operating System — Kubernetes Cluster Management Platform
+        SDOS Operating System Kubernetes Cluster Management Platform
     </div>
 
     <script>
@@ -329,7 +321,7 @@ HOME_TEMPLATE = '''
                 if (data.all_ok) {
                     showDashboard(username);
                 } else {
-                    errEl.textContent = data.error || 'Login failed — please try again.';
+                    errEl.textContent = data.error || 'Login failed please try again.';
                 }
             } catch(e) {
                 errEl.textContent = 'Error: ' + e.message;
@@ -371,7 +363,6 @@ def registry_status():
         pass
     return jsonify(result)
 
-# Role mapping
 USER_ROLES = {
     'admin':     'Administrator',
     'ruairi':    'Administrator',
@@ -451,7 +442,7 @@ if __name__ == '__main__':
     log.setLevel(logging.ERROR)
 
     clear_session()
-    print("Session cleared — all users must log in again.")
+    print("Session cleared all users must log in again.")
 
     print("=" * 60)
     print("SDOS Home Page")

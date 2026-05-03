@@ -23,7 +23,6 @@ pipeline {
                     echo "Testing real Kubernetes services with HTTP traffic" >> $WORKSPACE/$REPORT_FILE
                     echo "============================================" >> $WORKSPACE/$REPORT_FILE
 
-                    # Check all pods are running before starting
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== PRE-FLIGHT: POD STATUS ===" >> $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | tee -a $WORKSPACE/$REPORT_FILE
@@ -33,12 +32,11 @@ pipeline {
                     echo "Running pods before test: $RUNNING" >> $WORKSPACE/$REPORT_FILE
 
                     if [ "$RUNNING" -lt "18" ]; then
-                        echo "ABORT: Only $RUNNING pods running — cluster not healthy enough to test"
+                        echo "ABORT: Only $RUNNING pods running cluster not healthy enough to test"
                         exit 1
                     fi
-                    echo "Pre-flight PASSED — $RUNNING pods running" >> $WORKSPACE/$REPORT_FILE
+                    echo "Pre-flight PASSED $RUNNING pods running" >> $WORKSPACE/$REPORT_FILE
 
-                    # Install curl and k6 if needed
                     which k6 > /dev/null 2>&1 || \
                         (curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg 2>/dev/null && \
                         echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list > /dev/null && \
@@ -51,7 +49,7 @@ pipeline {
 
         stage('Test') {
             steps {
-                echo 'Stage 2 — Baseline metrics + service health check'
+                echo 'Stage 2 Baseline metrics + service health check'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== BASELINE METRICS ===" >> $WORKSPACE/$REPORT_FILE
@@ -60,7 +58,6 @@ pipeline {
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== SERVICE HEALTH CHECKS ===" >> $WORKSPACE/$REPORT_FILE
 
-                    # Test dev and prod directly
                     for URL in $DEV_URL $PROD_URL; do
                         STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 $URL 2>/dev/null || echo "UNREACHABLE")
                         LATENCY=$(curl -s -o /dev/null -w "%{time_total}" --connect-timeout 5 $URL 2>/dev/null || echo "N/A")
@@ -75,7 +72,6 @@ pipeline {
                     echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s" >> $WORKSPACE/$REPORT_FILE
                     echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s"
 
-                    # Node resource snapshot before load
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== NODE RESOURCES BEFORE LOAD ===" >> $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null >> $WORKSPACE/$REPORT_FILE || \
@@ -91,7 +87,7 @@ pipeline {
 
         stage('Staging') {
             steps {
-                echo 'Stage 3 — HTTP load test against dev and prod services'
+                echo 'Stage 3 HTTP load test against dev and prod services'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== HTTP LOAD TEST ===" >> $WORKSPACE/$REPORT_FILE
@@ -105,7 +101,6 @@ pipeline {
                     FAIL=0
                     TOTAL_TIME=0
 
-                    # Send 10000 requests in parallel batches of 100
                     rm -f /tmp/success_dev /tmp/fail_dev
                     > /tmp/success_dev
                     > /tmp/fail_dev
@@ -135,14 +130,12 @@ pipeline {
                     echo "Total time: ${DEV_DURATION}s" >> $WORKSPACE/$REPORT_FILE
                     echo "Throughput: ${DEV_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
 
-                    # Test prod service
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "--- Production Service ($PROD_URL) ---" >> $WORKSPACE/$REPORT_FILE
 
                     SUCCESS=0
                     FAIL=0
 
-                    # Send 10000 requests in parallel batches of 100
                     rm -f /tmp/success_prod /tmp/fail_prod
                     > /tmp/success_prod
                     > /tmp/fail_prod
@@ -172,7 +165,6 @@ pipeline {
                     echo "Total time: ${PROD_DURATION}s" >> $WORKSPACE/$REPORT_FILE
                     echo "Throughput: ${PROD_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
 
-                    # Test frontend service via vagrant ssh
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "--- Frontend Service (worker-dev:30091) ---" >> $WORKSPACE/$REPORT_FILE
 
@@ -201,7 +193,7 @@ pipeline {
 
         stage('Load') {
             steps {
-                echo 'Stage 4 — Spike test + pod resilience check'
+                echo 'Stage 4 Spike test + pod resilience check'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== SPIKE TEST ===" >> $WORKSPACE/$REPORT_FILE
@@ -217,19 +209,16 @@ pipeline {
 
                     echo "Spike test complete" >> $WORKSPACE/$REPORT_FILE
 
-                    # Check pod restarts after spike
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== POD RESTARTS AFTER SPIKE ===" >> $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces \
                         --sort-by='.status.containerStatuses[0].restartCount' 2>/dev/null >> $WORKSPACE/$REPORT_FILE
 
-                    # Node resources during load
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== NODE RESOURCES DURING LOAD ===" >> $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null >> $WORKSPACE/$REPORT_FILE || \
                         echo "metrics-server not available" >> $WORKSPACE/$REPORT_FILE
 
-                    # Pod failure test - delete one pod and check recovery
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== POD RESILIENCE TEST ===" >> $WORKSPACE/$REPORT_FILE
                     echo "Deleting one sdos-nginx-dev pod to test recovery..." >> $WORKSPACE/$REPORT_FILE
@@ -256,7 +245,7 @@ pipeline {
 
         stage('Production') {
             steps {
-                echo 'Stage 5 — Recovery and final report'
+                echo 'Stage 5 Recovery and final report'
                 sh '''
                     sleep 15
 
@@ -275,7 +264,6 @@ pipeline {
                         echo "$NOT_RUNNING" >> $WORKSPACE/$REPORT_FILE
                     fi
 
-                    # Final service check
                     echo "" >> $WORKSPACE/$REPORT_FILE
                     echo "=== FINAL SERVICE HEALTH ===" >> $WORKSPACE/$REPORT_FILE
                     for URL in $DEV_URL $PROD_URL; do
@@ -300,9 +288,9 @@ pipeline {
                     echo "=== TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║    APPLICATION LOAD TEST RESULTS       ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "APPLICATION LOAD TEST RESULTS"
+                    echo '============================================'
                     cat $WORKSPACE/$REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'application-test-report.txt', fingerprint: true
@@ -314,7 +302,7 @@ pipeline {
         always {
             echo 'Application load test complete'
         }
-        success { echo 'Application test passed — check application-test-report.txt' }
+        success { echo 'Application test passed check application-test-report.txt' }
         failure { echo 'Application test failed' }
     }
 }

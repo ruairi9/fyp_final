@@ -1,8 +1,4 @@
 #!/bin/bash
-# ============================================
-# SDOS Registry Authentication Setup (K3s)
-# Run from host: bash setup-registry-auth.sh
-# ============================================
 
 set -e
 
@@ -16,12 +12,12 @@ echo "============================================"
 cd $VAGRANT_DIR
 
 echo ""
-echo "Step 1 — Installing htpasswd on worker-monitoring..."
+echo "Step 1 Installing htpasswd on worker-monitoring..."
 vagrant ssh worker-monitoring -c "sudo apt-get install -y apache2-utils -q" 2>/dev/null
 echo "Done"
 
 echo ""
-echo "Step 2 — Generating htpasswd credentials..."
+echo "Step 2 Generating htpasswd credentials..."
 vagrant ssh worker-monitoring -c "
     htpasswd -Bbn admin passadmin > /tmp/htpasswd
     htpasswd -Bbn ruairi 1234 >> /tmp/htpasswd
@@ -30,13 +26,13 @@ vagrant ssh worker-monitoring -c "
 " 2>/dev/null
 
 echo ""
-echo "Step 3 — Copying htpasswd file to host..."
+echo "Step 3 Copying htpasswd file to host..."
 vagrant ssh worker-monitoring -c "cat /tmp/htpasswd" 2>/dev/null > /tmp/registry-htpasswd
 echo "htpasswd file saved"
 cat /tmp/registry-htpasswd
 
 echo ""
-echo "Step 4 — Creating Kubernetes secret with htpasswd..."
+echo "Step 4 Creating Kubernetes secret with htpasswd..."
 kubectl delete secret registry-auth -n monitoring 2>/dev/null || true
 kubectl create secret generic registry-auth \
     --from-file=htpasswd=/tmp/registry-htpasswd \
@@ -44,7 +40,7 @@ kubectl create secret generic registry-auth \
 echo "Secret created"
 
 echo ""
-echo "Step 5 — Patching registry deployment to enable auth..."
+echo "Step 5 Patching registry deployment to enable auth..."
 kubectl patch deployment docker-registry -n monitoring --type=json -p='[
   {
     "op": "add",
@@ -93,12 +89,12 @@ kubectl patch deployment docker-registry -n monitoring --type=json -p='[
 echo "Deployment patched"
 
 echo ""
-echo "Step 6 — Waiting for registry pod to restart..."
+echo "Step 6 Waiting for registry pod to restart..."
 kubectl rollout status deployment/docker-registry -n monitoring --timeout=60s
 echo "Registry restarted"
 
 echo ""
-echo "Step 7 — Testing authentication..."
+echo "Step 7 Testing authentication..."
 sleep 3
 REGISTRY_IP="192.168.121.50"
 

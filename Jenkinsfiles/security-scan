@@ -12,14 +12,13 @@ pipeline {
         stage('Setup') {
             steps {
                 echo '============================================'
-                echo ' STAGE 1 — SETUP'
+                echo ' STAGE 1 SETUP'
                 echo ' Installing Trivy scanner'
                 echo '============================================'
                 sh '''
                     echo "Security Scan Started: $(date)" > $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
 
-                    # Install trivy if not present
                     export PATH=$PATH:/home/ruairi/.local/bin
                     if ! which trivy > /dev/null 2>&1; then
                         echo "Installing Trivy..."
@@ -37,7 +36,7 @@ pipeline {
         stage('Scan Images') {
             steps {
                 echo '============================================'
-                echo ' STAGE 2 — IMAGE SCAN'
+                echo ' STAGE 2 IMAGE SCAN'
                 echo ' Scanning Docker images for vulnerabilities'
                 echo '============================================'
                 sh '''
@@ -45,24 +44,21 @@ pipeline {
                     echo "" >> $REPORT_FILE
                     echo "=== DOCKER IMAGE SCANS ===" >> $REPORT_FILE
 
-                    # Scan nginx image used in nginx-deploy pipeline
                     echo "Scanning nginx:1.25.3..."
                     echo "--- nginx:1.25.3 ---" >> $REPORT_FILE
                     trivy image --severity HIGH,CRITICAL --no-progress nginx:1.25.3 2>/dev/null >> $REPORT_FILE || true
 
-                    # Scan python image used in e2e-test pipeline
                     echo "Scanning python:3.11-alpine..."
                     echo "" >> $REPORT_FILE
                     echo "--- python:3.11-alpine ---" >> $REPORT_FILE
                     trivy image --severity HIGH,CRITICAL --no-progress python:3.11-alpine 2>/dev/null >> $REPORT_FILE || true
 
-                    # Scan sdos-backend if it exists in registry
                     echo "Scanning sdos-backend from private registry..."
                     echo "" >> $REPORT_FILE
                     echo "--- sdos-backend (private registry) ---" >> $REPORT_FILE
                     trivy image --severity HIGH,CRITICAL --no-progress \
                         --insecure \
-                        $REGISTRY/sdos-backend:latest 2>/dev/null >> $REPORT_FILE || echo "sdos-backend not found in registry — skipping" >> $REPORT_FILE
+                        $REGISTRY/sdos-backend:latest 2>/dev/null >> $REPORT_FILE || echo "sdos-backend not found in registry skipping" >> $REPORT_FILE
 
                     echo "Image scans complete"
                 '''
@@ -72,7 +68,7 @@ pipeline {
         stage('Scan K8s') {
             steps {
                 echo '============================================'
-                echo ' STAGE 3 — KUBERNETES SCAN'
+                echo ' STAGE 3 KUBERNETES SCAN'
                 echo ' Scanning cluster for misconfigurations'
                 echo '============================================'
                 sh '''
@@ -93,7 +89,7 @@ pipeline {
         stage('Scan Config') {
             steps {
                 echo '============================================'
-                echo ' STAGE 4 — CONFIG SCAN'
+                echo ' STAGE 4 CONFIG SCAN'
                 echo ' Scanning Dockerfiles and K8s manifests'
                 echo '============================================'
                 sh '''
@@ -101,16 +97,13 @@ pipeline {
                     echo "" >> $REPORT_FILE
                     echo "=== CONFIG FILE SCANS ===" >> $REPORT_FILE
 
-                    # Scan the Vagrantfile area for any config issues
                     cd /home/ruairi/fyp-cluster
 
-                    # Scan Dockerfile if exists
                     if [ -f "Dockerfile" ]; then
                         echo "--- Dockerfile ---" >> $WORKSPACE/$REPORT_FILE
                         trivy config --severity HIGH,CRITICAL --no-progress Dockerfile 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true
                     fi
 
-                    # Scan any yaml manifests
                     echo "--- K8s Manifests ---" >> $WORKSPACE/$REPORT_FILE
                     find . -name "*.yaml" -not -path "*/.*" 2>/dev/null | head -10 | while read f; do
                         echo "Scanning $f..." >> $WORKSPACE/$REPORT_FILE
@@ -125,14 +118,13 @@ pipeline {
         stage('Report') {
             steps {
                 echo '============================================'
-                echo ' STAGE 5 — SECURITY REPORT'
+                echo ' STAGE 5 SECURITY REPORT'
                 echo ' Summarising all findings'
                 echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
                     echo "=== SCAN COMPLETE: $(date) ===" >> $REPORT_FILE
 
-                    # Count critical and high findings
                     CRITICAL=$(grep -c "CRITICAL" $REPORT_FILE || echo 0)
                     HIGH=$(grep -c "HIGH" $REPORT_FILE || echo 0)
 
@@ -142,9 +134,9 @@ pipeline {
                     echo "HIGH findings:     $HIGH" >> $REPORT_FILE
 
                     echo ""
-                    echo "╔════════════════════════════════════════╗"
-                    echo "║         SECURITY SCAN REPORT           ║"
-                    echo "╚════════════════════════════════════════╝"
+                    echo '============================================'
+                    echo "SECURITY SCAN REPORT"
+                    echo '============================================'
                     echo "CRITICAL findings: $CRITICAL"
                     echo "HIGH findings:     $HIGH"
                     echo ""
@@ -157,8 +149,8 @@ pipeline {
     }
 
     post {
-        success { echo 'Security scan complete — check security-scan-report.txt in artifacts' }
-        failure { echo 'Security scan failed — check the logs above' }
+        success { echo 'Security scan complete check security-scan-report.txt in artifacts' }
+        failure { echo 'Security scan failed check the logs above' }
         always {
             sh 'echo "Scan finished: $(date)"'
         }

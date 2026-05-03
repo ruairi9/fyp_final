@@ -10,20 +10,17 @@ echo " SDOS Project Setup"
 echo "============================================"
 echo ""
 
-# Check Ubuntu
 if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
     echo "ERROR: This setup requires Ubuntu"
     exit 1
 fi
 
-# Check virtualisation
 if ! kvm-ok > /dev/null 2>&1; then
     echo "ERROR: KVM virtualisation not available"
     echo "Enable virtualisation in your BIOS and try again"
     exit 1
 fi
 
-# Install dependencies
 echo "Installing dependencies..."
 sudo apt-get update -q
 sudo apt-get install -y \
@@ -38,7 +35,6 @@ sudo apt-get install -y \
     cpu-checker \
     curl
 
-# Fix 5: Install kubectl
 if ! which kubectl > /dev/null 2>&1; then
     echo "Installing kubectl..."
     curl -LO "https://dl.k8s.io/release/v1.28.5/bin/linux/amd64/kubectl"
@@ -46,14 +42,11 @@ if ! which kubectl > /dev/null 2>&1; then
     sudo mv kubectl /usr/local/bin/
 fi
 
-# Install vagrant-libvirt plugin
 vagrant plugin install vagrant-libvirt 2>/dev/null || true
 
-# Add user to groups
 sudo usermod -aG libvirt $USER
 sudo usermod -aG docker $USER
 
-# Fix 6: Check if user is already in groups before continuing
 if ! groups | grep -q docker || ! groups | grep -q libvirt; then
     echo ""
     echo "============================================"
@@ -69,7 +62,6 @@ if ! groups | grep -q docker || ! groups | grep -q libvirt; then
     exit 0
 fi
 
-# ── Start VMs ────────────────────────────────────────────────
 echo ""
 echo "Starting VMs (this takes 30-60 mins first time)..."
 cd "$SCRIPT_DIR"
@@ -79,7 +71,6 @@ echo ""
 echo "Waiting for VMs to be ready..."
 sleep 60
 
-# ── Check 1: VMs running (Fix 2 + Fix 3) ─────────────────────
 echo ""
 echo "Checking VM status..."
 RUNNING=$(vagrant status --machine-readable | grep ",state,running" | wc -l)
@@ -91,7 +82,6 @@ else
     exit 1
 fi
 
-# ── Check 2: Kubernetes responding ───────────────────────────
 echo ""
 echo "Checking Kubernetes cluster..."
 for i in $(seq 1 12); do
@@ -112,7 +102,6 @@ else
     exit 1
 fi
 
-# ── Check 3: Pods running (Fix 1) ────────────────────────────
 echo ""
 echo "Checking pods..."
 sleep 30
@@ -128,7 +117,6 @@ else
     exit 1
 fi
 
-# ── Start dashboards ─────────────────────────────────────────
 echo ""
 echo "Starting dashboards..."
 cd "$SCRIPT_DIR/sdos-dashboard"
@@ -138,7 +126,6 @@ echo ""
 echo "Waiting for dashboards to start..."
 sleep 15
 
-# ── Check 4: Dashboard services reachable (Fix 4) ────────────
 echo ""
 echo "Checking dashboard services..."
 ALL_UP=true
