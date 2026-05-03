@@ -1,8 +1,5 @@
-# Vagrant
 .vagrant/
 *.box
-
-# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -12,33 +9,27 @@ __pycache__/
 dist/
 build/
 .eggs/
-
-# Logs
 logs/
 *.log
-
-# SDOS data files (contain personal tokens - don't commit)
 github_repos.json
 github_edits.json
 github_pending_deletes.json
 pipeline_mappings.json
-
-# K3s kubeconfig (contains credentials)
 k3s.yaml
-
-# Environment
 .env
 .venv/
 venv/
-
-# OS
 .DS_Store
 Thumbs.db
-
-# IDE
 .vscode/
 .idea/
 sdos-dashboard/github-clones/
 sdos-dashboard/sample1/
 sdos-dashboard/sample2/
 sdos-dashboard/.sdos_session
+k3s-token.txt
+jenkins-info.txt
+jenkins_agent.key
+jenkins_agent.pub
+*-report.txt
+*.backup
