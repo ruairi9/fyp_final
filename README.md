@@ -4,129 +4,133 @@ A Kubernetes cluster management and monitoring platform built on a 5-VM K3s clus
 
 ---
 
-## Architecture
+ Architecture
 
-```
-Host Machine
-├── 5x Vagrant VMs (libvirt)
-│   ├── control-plane      192.168.121.10  (K3s master)
-│   ├── worker-dev         192.168.121.20  (development workloads)
-│   ├── worker-production  192.168.121.30  (production workloads)
-│   ├── worker-cicd        192.168.121.40  (Jenkins :32080)
-│   └── worker-monitoring  192.168.121.50  (Prometheus :32090, Grafana :32030)
-│
-└── SDOS Dashboard (Docker or bare Python)
-    ├── Home Page           :5000
-    ├── Cluster Dashboard   :8080
-    ├── Server Dashboard    :9000
-    ├── Pipeline Dashboard  :7000
-    └── Developer Workspace :6001
-```
+5 VMs managed by Vagrant and KVM/libvirt:
 
+    control-plane      192.168.121.10   K3s master
+    worker-dev         192.168.121.20   development workloads
+    worker-production  192.168.121.30   production workloads
+    worker-cicd        192.168.121.40   Jenkins :32080
+    worker-monitoring  192.168.121.50   Prometheus :32090  Grafana :32030
+
+SDOS Dashboard running on the host machine:
+
+    Home Page            port 5000
+    Cluster Dashboard    port 8080
+    Server Dashboard     port 9000
+    Pipeline Dashboard   port 7000
+    Developer Workspace  port 6001
 ---
 
 ## Requirements
 
 ### Host machine
 - Ubuntu 20.04+ (or similar Linux)
-- [Vagrant](https://www.vagrantup.com/) + [libvirt](https://libvirt.org/)
-- Docker + Docker Compose (for containerised deployment)
-- OR Python 3.11+ (for bare metal deployment)
+- KVM/libvirt enabled in BIOS
+- Vagrant + vagrant-libvirt plugin
+- Python 3.11+
+- kubectl
+
+### Install dependencies
+
+    sudo apt-get install -y vagrant libvirt-daemon-system libvirt-clients qemu-kvm
+    vagrant plugin install vagrant-libvirt
+    curl -LO "https://dl.k8s.io/release/v1.28.5/bin/linux/amd64/kubectl"
+    chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+    pip install flask requests
+
+---
+
+## Tokens Required
+
+Before running SDOS you need to configure the following tokens:
+
+### 1. Jenkins API Token
+Used by the Developer Workspace to trigger and monitor pipelines.
+
+1. Start the cluster and open Jenkins at http://192.168.121.40:32080
+2. Log in with admin / admin
+3. Click your username -> Configure -> API Token -> Add new Token -> Generate
+4. Open sdos-dashboard/developer_workspace.py and replace YOUR_JENKINS_TOKEN with the generated token
+
+### 2. Jenkins Agent Token
+Used by setup-after-restart.sh to connect the host Jenkins agent.
+
+1. Open Jenkins at http://192.168.121.40:32080
+2. Manage Jenkins -> Nodes -> host-agent -> Status -> copy the secret
+3. Open setup-after-restart.sh and replace YOUR_JENKINS_TOKEN with the copied secret
+
+### 3. GitHub Personal Access Token (optional)
+Used by the Developer Workspace to browse and edit GitHub repositories.
+
+1. Go to https://github.com/settings/tokens
+2. Generate a new token with repo scope
+3. Paste it into the Developer Workspace UI when adding a repository
 
 ---
 
 ## Quick Start
 
-### 1. Clone the repo
-```bash
-git clone https://github.com/YOUR_USERNAME/fyp.git
-cd fyp
-```
+Run these commands in order:
 
-### 2. Start the K3s cluster
-```bash
-vagrant up
-sleep 180   # wait for cluster to fully initialise
+    git clone https://github.com/YOUR_USERNAME/fyp.git
+    cd fyp
+    bash host-setup.sh
+    vagrant up
+    sleep 180
+    vagrant ssh control-plane -c "sudo cat /etc/rancher/k3s/k3s.yaml" 2>/dev/null | grep -v fog | grep -v WARNING > k3s.yaml
+    sed -i 's/0.0.0.0/192.168.121.220/' k3s.yaml
+    export KUBECONFIG=~/fyp/k3s.yaml
+    kubectl label nodes worker-dev-integration node-role=development --overwrite
+    kubectl label nodes worker-production node-role=production --overwrite
+    cd sdos-dashboard && bash run-all.sh
 
-# Label the worker nodes
-export KUBECONFIG=./k3s.yaml
-kubectl label nodes worker-dev-integration node-role=development --overwrite
-kubectl label nodes worker-production      node-role=production  --overwrite
-```
-
-### 3a. Run with Docker (recommended)
-```bash
-docker compose up --build
-```
-Open http://localhost:5000
-
-### 3b. Run without Docker
-```bash
-pip install -r requirements.txt
-bash run-all.sh
-```
-Open http://localhost:5000
-
----
-
-## Running on a separate PC
-
-If you want to run the SDOS dashboard on a **different machine** from the VMs:
-
-1. Copy `k3s.yaml` from the host machine to the dashboard machine
-2. Edit `k3s.yaml` — change the server IP from `127.0.0.1` to `192.168.121.10`
-3. Make sure the dashboard machine can reach `192.168.121.x` (same network / VPN)
-4. Run the dashboard normally with Docker or Python
-
----
-
-## Services
-
-| Service | Port | Description |
-|---------|------|-------------|
-| Home | 5000 | Landing page linking to all dashboards |
-| Cluster Dashboard | 8080 | K3s node metrics, Jenkins pipelines, resource charts |
-| Server Dashboard | 9000 | Per-VM CPU/RAM/disk metrics and charts |
-| Pipeline Dashboard | 7000 | Jenkins CI/CD pipeline status and stage tracking |
-| Developer Workspace | 6001 | Monaco editor with GitHub integration and Jenkins pipeline linking |
-
----
-
-## Jenkins
-
-Jenkins runs on `worker-cicd` at `http://192.168.121.40:32080`
-
-Default credentials: `admin / admin`
-
-To get your API token for the Developer Workspace:
-1. Log in to Jenkins
-2. Click your username → Configure
-3. API Token → Add new Token → Generate
-4. Paste the token into `developer_workspace.py` under `JENKINS_TOKEN`
-
----
-
-## Logs
-
-When running with `run-all.sh`, logs are written to the `logs/` directory:
-```
-logs/home.log
-logs/dashboard.log
-logs/server_dashboard.log
-logs/pipeline_dashboard.log
-logs/developer_workspace.log
-```
+Then open http://localhost:5000
 
 ---
 
 ## After every host restart
 
-```bash
-cd ~/fyp
-vagrant up
-sleep 180
-export KUBECONFIG=./k3s.yaml
-kubectl label nodes worker-dev-integration node-role=development --overwrite
-kubectl label nodes worker-production      node-role=production  --overwrite
-docker compose up -d   # or: bash run-all.sh
-```
+    cd ~/fyp
+    bash setup-after-restart.sh
+
+This will start all VMs, wait for K3s, label nodes, start dashboards and connect the Jenkins agent.
+
+---
+
+## Webpage
+
+Home               port 5000    Login page linking to all dashboards
+Cluster Dashboard  port 8080    K3s node metrics, Jenkins pipelines, resource charts
+Server Dashboard   port 9000    Per-VM CPU/RAM/disk metrics and charts
+Pipeline Dashboard port 7000    Jenkins CI/CD pipeline status and stage tracking
+Developer Workspace port 6001   Monaco editor with GitHub integration and Jenkins pipeline linking
+
+---
+
+## Jenkins
+
+Jenkins runs on worker-cicd at http://192.168.121.40:32080
+
+Default credentials: admin / admin
+
+---
+
+## Registry
+
+The private Docker registry runs at 192.168.121.50:30500
+
+Default credentials: admin / passadmin
+
+---
+
+## Logs
+
+Logs are written to the sdos-dashboard/logs/ directory:
+
+    logs/home.log
+    logs/dashboard.log
+    logs/server_dashboard.log
+    logs/pipeline_dashboard.log
+    logs/developer_workspace.log

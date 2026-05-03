@@ -33,3 +33,4 @@ jenkins_agent.key
 jenkins_agent.pub
 *-report.txt
 *.backup
+terraform/.terraform/

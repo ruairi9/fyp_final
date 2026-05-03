@@ -2765,7 +2765,7 @@ def save_file():
 
 JENKINS_URL   = "http://192.168.121.40:32080"
 JENKINS_USER  = "admin"
-JENKINS_TOKEN = "119841289d2010c9d2b89611641fd17bef"
+JENKINS_TOKEN = "YOUR_JENKINS_TOKEN"
 PIPELINE_MAPPINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pipeline_mappings.json')
 
 def load_pipeline_mappings():

@@ -26,19 +26,16 @@ variable "network_cidr" {
   default     = "192.168.121.0/24"
 }
 
-# ── Network ──────────────────────────────────────────────────
 resource "libvirt_network" "cluster_network" {
   name      = "${var.cluster_name}-network"
   autostart = true
 }
 
-# ── Base OS volume ────────────────────────────────────────────
 resource "libvirt_volume" "base_image" {
   name = "ubuntu-22.04-base.qcow2"
   pool = "default"
 }
 
-# ── Per-VM disk volumes ───────────────────────────────────────
 resource "libvirt_volume" "control_plane_disk" {
   name = "${var.cluster_name}-control-plane.qcow2"
   pool = "default"
@@ -64,7 +61,6 @@ resource "libvirt_volume" "worker_monitoring_disk" {
   pool = "default"
 }
 
-# ── Cloud-init configs ────────────────────────────────────────
 resource "libvirt_cloudinit_disk" "control_plane_init" {
   name      = "${var.cluster_name}-control-plane-init.iso"
   meta_data = jsonencode({ "instance-id" = "control-plane" })
@@ -140,7 +136,6 @@ resource "libvirt_cloudinit_disk" "worker_monitoring_init" {
   EOF
 }
 
-# ── Virtual Machines ──────────────────────────────────────────
 resource "libvirt_domain" "control_plane" {
   name   = "${var.cluster_name}_control-plane"
   memory = 2048
@@ -176,7 +171,6 @@ resource "libvirt_domain" "worker_monitoring" {
   type   = "kvm"
 }
 
-# ── Outputs ───────────────────────────────────────────────────
 output "cluster_summary" {
   description = "Summary of the fyp-cluster"
   value = {
