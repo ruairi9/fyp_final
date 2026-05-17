@@ -10,16 +10,14 @@ import secrets
 from collections import defaultdict
 import re
 
-import json as _json_sess
-import os as _os_sess
-
-_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+SESSION_FILE = os.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
 
 def _get_session():
+    """read login state from shared session file (used across all dashboards)"""
     try:
-        if _os_sess.path.exists(_SESSION_FILE):
-            with open(_SESSION_FILE) as _f:
-                return _json_sess.load(_f)
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE) as f:
+                return json.load(f)
     except Exception:
         pass
     return {}
@@ -2765,7 +2763,7 @@ def save_file():
 
 JENKINS_URL   = "http://192.168.121.40:32080"
 JENKINS_USER  = "admin"
-JENKINS_TOKEN = "119841289d2010c9d2b89611641fd17bef"
+JENKINS_TOKEN = "YOUR_JENKINS_TOKEN"
 PIPELINE_MAPPINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pipeline_mappings.json')
 
 def load_pipeline_mappings():
