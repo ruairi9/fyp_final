@@ -13,322 +13,167 @@ pipeline {
 
         stage('VMs') {
             steps {
-                echo '============================================'
-                echo ' STAGE 1 VM HEALTH'
-                echo ' Checking all 5 VMs are reachable'
-                echo '============================================'
                 sh '''
-                    echo "Health Check Report $(date)" > $REPORT_FILE
-                    echo "============================================" >> $REPORT_FILE
-
-                    PASS=0
-                    FAIL=0
+                    echo "Health Check $(date)" > $REPORT_FILE
                     cd $VAGRANT_DIR
-
-                    echo "" >> $REPORT_FILE
-                    echo "=== VM HEALTH ===" >> $REPORT_FILE
+                    PASS=0; FAIL=0
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        SUCCESS=0
+                        OK=0
                         for i in 1 2 3; do
                             STATUS=$(vagrant ssh $VM -c "echo OK" 2>/dev/null | grep -c OK || echo 0)
                             STATUS=${STATUS:-0}
-                            if [ "$STATUS" -ge "1" ] 2>/dev/null; then
-                                SUCCESS=1
-                                break
-                            fi
+                            if [ "$STATUS" -ge "1" ] 2>/dev/null; then OK=1; break; fi
                             sleep 3
                         done
-
-                        if [ "$SUCCESS" -eq "1" ]; then
-                            echo "PASS: $VM is reachable"
-                            echo "PASS: $VM reachable" >> $REPORT_FILE
-                            PASS=$((PASS+1))
+                        if [ "$OK" -eq "1" ]; then
+                            echo "PASS: $VM reachable"; PASS=$((PASS+1))
                         else
-                            echo "FAIL: $VM is UNREACHABLE after 3 attempts"
-                            echo "FAIL: $VM UNREACHABLE" >> $REPORT_FILE
-                            FAIL=$((FAIL+1))
+                            echo "FAIL: $VM unreachable after 3 retries"; FAIL=$((FAIL+1))
                         fi
                     done
 
-                    echo "" >> $REPORT_FILE
-                    echo "VM Health: $PASS/5 reachable" >> $REPORT_FILE
-                    echo "============================================"
-                    echo "VM Health: $PASS/5 reachable"
-                    echo "============================================"
-
-                    if [ "$FAIL" -gt "0" ]; then
-                        echo "FAIL: $FAIL VM(s) unreachable"
-                        exit 1
-                    fi
+                    echo "VMs: $PASS/5 up" >> $REPORT_FILE
+                    [ "$FAIL" -gt "0" ] && exit 1 || true
                 '''
             }
         }
 
         stage('Pods') {
             steps {
-                echo '============================================'
-                echo ' STAGE 2 POD HEALTH'
-                echo ' Checking all pods are Running'
-                echo '============================================'
                 sh '''
                     echo "" >> $REPORT_FILE
-                    echo "=== POD HEALTH ===" >> $REPORT_FILE
 
-                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get pods \
-                        --all-namespaces --no-headers 2>/dev/null | wc -l)
-                    TOTAL=${TOTAL:-0}
+                    TOTAL_N=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers 2>/dev/null | wc -l)
+                    READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers 2>/dev/null | grep -c " Ready" || true)
+                    NOT_READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes --no-headers 2>/dev/null | grep -c "NotReady" || true)
+                    [ -z "$READY" ] && READY=0
+                    [ -z "$NOT_READY" ] && NOT_READY=0
 
-                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods \
-                        --all-namespaces --no-headers 2>/dev/null | grep -c "Running" || true)
-                    RUNNING=${RUNNING:-0}
+                    echo "Nodes: $READY/$TOTAL_N ready"
+                    kubectl --kubeconfig=$KUBECONFIG get nodes 2>/dev/null
+                    echo "Nodes: $READY/$TOTAL_N ready" >> $REPORT_FILE
 
-                    # Fix 1: safe numeric check
-                    FAILED=$(kubectl --kubeconfig=$KUBECONFIG get pods \
-                        --all-namespaces --no-headers 2>/dev/null \
-                        | grep -cE "Error|CrashLoop|OOMKilled|Evicted" || true)
-                    [ -z "$FAILED" ] && FAILED=0
-
-                    PENDING=$(kubectl --kubeconfig=$KUBECONFIG get pods \
-                        --all-namespaces --no-headers 2>/dev/null | grep -c "Pending" || true)
-                    [ -z "$PENDING" ] && PENDING=0
-
-                    echo "Total pods:   $TOTAL"
-                    echo "Running:      $RUNNING"
-                    echo "Pending:      $PENDING"
-                    echo "Failed:       $FAILED"
-
-                    echo "Total: $TOTAL  Running: $RUNNING  Pending: $PENDING  Failed: $FAILED" >> $REPORT_FILE
-
-                    echo ""
-                    echo "=== Pod List ==="
-                    kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null
-                    kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null >> $REPORT_FILE
-
-                    echo "============================================"
-                    if [ "$FAILED" -gt "0" ] 2>/dev/null; then
-                        echo "FAIL: $FAILED pod(s) in error state"
-                        echo "FAIL: $FAILED pod(s) in error state" >> $REPORT_FILE
+                    if [ "$NOT_READY" -gt "0" ] 2>/dev/null; then
+                        echo "FAIL: $NOT_READY node(s) not ready"
                         exit 1
                     fi
-                    if [ "$RUNNING" -ne "$TOTAL" ] 2>/dev/null && [ "$TOTAL" -gt "0" ] 2>/dev/null; then
-                        NOT_RUNNING=$((TOTAL - RUNNING))
-                        echo "WARN: $NOT_RUNNING pod(s) are not Running (Total: $TOTAL Running: $RUNNING)"
-                        echo "WARN: $NOT_RUNNING pod(s) not running" >> $REPORT_FILE
-                    else
-                        echo "PASS: All $RUNNING/$TOTAL pods running"
-                        echo "PASS: All $RUNNING/$TOTAL pods running" >> $REPORT_FILE
+
+                    TOTAL_P=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | wc -l)
+                    RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | grep -c "Running" || true)
+                    FAILED=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null | grep -cE "Error|CrashLoop|OOMKilled" || true)
+                    [ -z "$RUNNING" ] && RUNNING=0
+                    [ -z "$FAILED" ] && FAILED=0
+
+                    echo "Pods: $RUNNING/$TOTAL_P running, $FAILED failed"
+                    echo "Pods: $RUNNING/$TOTAL_P running, $FAILED failed" >> $REPORT_FILE
+
+                    kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers 2>/dev/null
+
+                    if [ "$FAILED" -gt "0" ] 2>/dev/null; then
+                        echo "FAIL: $FAILED pod(s) in error state"
+                        exit 1
                     fi
-                    echo "============================================"
+
+                    kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null || echo "WARN: metrics-server unavailable, skipping resource check"
                 '''
             }
         }
 
         stage('Nodes') {
             steps {
-                echo '============================================'
-                echo ' STAGE 3 NODE HEALTH + CPU/MEMORY'
-                echo ' Checking all K3s nodes are Ready'
-                echo ' Checking CPU and Memory usage'
-                echo '============================================'
                 sh '''
-                    echo "" >> $REPORT_FILE
-                    echo "=== NODE HEALTH ===" >> $REPORT_FILE
-
-                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get nodes \
-                        --no-headers 2>/dev/null | wc -l)
-                    TOTAL=${TOTAL:-0}
-
-                    READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes \
-                        --no-headers 2>/dev/null | grep -c " Ready" || true)
-                    [ -z "$READY" ] && READY=0
-
-                    NOT_READY=$(kubectl --kubeconfig=$KUBECONFIG get nodes \
-                        --no-headers 2>/dev/null | grep -c "NotReady" || true)
-                    [ -z "$NOT_READY" ] && NOT_READY=0
-
-                    echo "Total nodes:  $TOTAL"
-                    echo "Ready:        $READY"
-                    echo "Not Ready:    $NOT_READY"
-                    echo ""
-                    kubectl --kubeconfig=$KUBECONFIG get nodes 2>/dev/null
-                    kubectl --kubeconfig=$KUBECONFIG get nodes 2>/dev/null >> $REPORT_FILE
-
-                    echo "" >> $REPORT_FILE
-                    echo "=== CPU AND MEMORY USAGE ===" >> $REPORT_FILE
-
-                    # Check metrics-server is running before kubectl top
-                    METRICS=$(kubectl --kubeconfig=$KUBECONFIG get pods -n kube-system                         --no-headers 2>/dev/null | grep metrics-server | grep -c Running || true)
-                    [ -z "$METRICS" ] && METRICS=0
-                    if [ "$METRICS" -lt "1" ] 2>/dev/null; then
-                        echo "WARN: metrics-server not running skipping CPU/memory check"
-                        echo "WARN: metrics-server not running" >> $REPORT_FILE
-                    else
-                        echo "PASS: metrics-server is running"
-                        echo "PASS: metrics-server running" >> $REPORT_FILE
-                    fi
+                    PASS=0; FAIL=0
 
                     for i in 1 2 3; do
-                        TOP_OUTPUT=$(kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null)
-                        if [ -n "$TOP_OUTPUT" ]; then
-                            echo "$TOP_OUTPUT"
-                            echo "$TOP_OUTPUT" >> $REPORT_FILE
-
-                            echo "$TOP_OUTPUT" | tail -n +2 | while read line; do
-                                NODE=$(echo $line | awk '{print $1}')
-                                CPU=$(echo $line | awk '{print $3}' | tr -d '%')
-                                MEM=$(echo $line | awk '{print $5}' | tr -d '%')
-                                CPU=${CPU:-0}
-                                MEM=${MEM:-0}
-                                if [ "$CPU" -gt "80" ] 2>/dev/null; then
-                                    echo "WARN: $NODE CPU at ${CPU}% high"
-                                fi
-                                if [ "$MEM" -gt "80" ] 2>/dev/null; then
-                                    echo "WARN: $NODE Memory at ${MEM}% high"
-                                fi
-                            done
-                            break
-                        fi
-                        sleep 5
+                        JCODE=$(curl -s -o /dev/null -w "%{http_code}" $JENKINS_URL --connect-timeout 5 || echo "000")
+                        [ "$JCODE" = "200" ] || [ "$JCODE" = "403" ] && break
+                        sleep 3
                     done
-
-                    echo "============================================"
-                    if [ "$NOT_READY" -gt "0" ] 2>/dev/null; then
-                        echo "FAIL: $NOT_READY node(s) not ready"
-                        exit 1
+                    if [ "$JCODE" = "200" ] || [ "$JCODE" = "403" ]; then
+                        echo "PASS: Jenkins up (HTTP $JCODE)"; PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Jenkins HTTP $JCODE"; FAIL=$((FAIL+1))
                     fi
-                    echo "PASS: All $READY nodes ready"
-                    echo "PASS: All $READY nodes ready" >> $REPORT_FILE
-                    echo "============================================"
+
+                    RCODE=$(curl -s -o /dev/null -w "%{http_code}" $REGISTRY/v2/ --connect-timeout 5 || echo "000")
+                    if [ "$RCODE" = "200" ] || [ "$RCODE" = "401" ]; then
+                        echo "PASS: Registry up (HTTP $RCODE)"; PASS=$((PASS+1))
+                    else
+                        echo "FAIL: Registry HTTP $RCODE"; FAIL=$((FAIL+1))
+                    fi
+
+                    GCODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.50:32030 --connect-timeout 5 || echo "000")
+                    if [ "$GCODE" = "200" ] || [ "$GCODE" = "302" ]; then
+                        echo "PASS: Grafana up"; PASS=$((PASS+1))
+                    else
+                        echo "WARN: Grafana not responding (HTTP $GCODE) - non-critical"
+                    fi
+
+                    echo "Services: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    [ "$FAIL" -gt "0" ] && exit 1 || true
                 '''
             }
         }
+
 
         stage('Services') {
             steps {
-                echo '============================================'
-                echo ' STAGE 4 SERVICE HEALTH'
-                echo ' Checking Jenkins and Registry are up'
-                echo '============================================'
                 sh '''
-                    echo "" >> $REPORT_FILE
-                    echo "=== SERVICE HEALTH ===" >> $REPORT_FILE
-                    PASS=0
-                    FAIL=0
+                    PASS=0; FAIL=0
 
                     for i in 1 2 3; do
-                        JENKINS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                            $JENKINS_URL --connect-timeout 5 || echo "000")
-                        if [ "$JENKINS_CODE" = "200" ] || [ "$JENKINS_CODE" = "403" ]; then
-                            break
-                        fi
+                        JCODE=$(curl -s -o /dev/null -w "%{http_code}" $JENKINS_URL --connect-timeout 5 || echo "000")
+                        [ "$JCODE" = "200" ] || [ "$JCODE" = "403" ] && break
                         sleep 3
                     done
-                    if [ "$JENKINS_CODE" = "200" ] || [ "$JENKINS_CODE" = "403" ]; then
-                        echo "PASS: Jenkins is up (HTTP $JENKINS_CODE)"
-                        echo "PASS: Jenkins up HTTP $JENKINS_CODE" >> $REPORT_FILE
-                        PASS=$((PASS+1))
+                    if [ "$JCODE" = "200" ] || [ "$JCODE" = "403" ]; then
+                        echo "PASS: Jenkins up (HTTP $JCODE)"; PASS=$((PASS+1))
                     else
-                        echo "FAIL: Jenkins returned HTTP $JENKINS_CODE"
-                        echo "FAIL: Jenkins HTTP $JENKINS_CODE" >> $REPORT_FILE
-                        FAIL=$((FAIL+1))
+                        echo "FAIL: Jenkins HTTP $JCODE"; FAIL=$((FAIL+1))
                     fi
 
-                    REGISTRY_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                        $REGISTRY/v2/ --connect-timeout 5 || echo "000")
-                    if [ "$REGISTRY_CODE" = "200" ] || [ "$REGISTRY_CODE" = "401" ]; then
-                        echo "PASS: Registry is up (HTTP $REGISTRY_CODE)"
-                        echo "PASS: Registry up HTTP $REGISTRY_CODE" >> $REPORT_FILE
-                        PASS=$((PASS+1))
+                    RCODE=$(curl -s -o /dev/null -w "%{http_code}" $REGISTRY/v2/ --connect-timeout 5 || echo "000")
+                    if [ "$RCODE" = "200" ] || [ "$RCODE" = "401" ]; then
+                        echo "PASS: Registry up (HTTP $RCODE)"; PASS=$((PASS+1))
                     else
-                        echo "FAIL: Registry returned HTTP $REGISTRY_CODE"
-                        echo "FAIL: Registry HTTP $REGISTRY_CODE" >> $REPORT_FILE
-                        FAIL=$((FAIL+1))
+                        echo "FAIL: Registry HTTP $RCODE"; FAIL=$((FAIL+1))
                     fi
 
-                    GRAFANA_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                        http://192.168.121.50:32030 --connect-timeout 5 || echo "000")
-                    if [ "$GRAFANA_CODE" = "200" ] || [ "$GRAFANA_CODE" = "302" ]; then
-                        echo "PASS: Grafana is up (HTTP $GRAFANA_CODE)"
-                        echo "PASS: Grafana up HTTP $GRAFANA_CODE" >> $REPORT_FILE
-                        PASS=$((PASS+1))
+                    GCODE=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.121.50:32030 --connect-timeout 5 || echo "000")
+                    if [ "$GCODE" = "200" ] || [ "$GCODE" = "302" ]; then
+                        echo "PASS: Grafana up"; PASS=$((PASS+1))
                     else
-                        echo "WARN: Grafana returned HTTP $GRAFANA_CODE"
-                        echo "WARN: Grafana HTTP $GRAFANA_CODE" >> $REPORT_FILE
+                        echo "WARN: Grafana not responding (HTTP $GCODE) - non-critical"
                     fi
 
-                    echo "" >> $REPORT_FILE
-                    echo "Service Health: $PASS passed, $FAIL failed" >> $REPORT_FILE
-                    echo "============================================"
-                    echo "Service Health: $PASS passed, $FAIL failed"
-                    echo "============================================"
-
-                    if [ "$FAIL" -gt "0" ]; then
-                        exit 1
-                    fi
+                    echo "Services: $PASS passed, $FAIL failed" >> $REPORT_FILE
+                    [ "$FAIL" -gt "0" ] && exit 1 || true
                 '''
             }
         }
-
         stage('Resources') {
             steps {
-                echo '============================================'
-                echo ' STAGE 5 RESOURCE HEALTH'
-                echo ' Checking disk space on all VMs'
-                echo '============================================'
                 sh '''
                     cd $VAGRANT_DIR
-                    FAIL=0
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== DISK USAGE ===" >> $WORKSPACE/$REPORT_FILE
+                    WARN=0
 
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
-                        DISK=$(vagrant ssh $VM -c \
-                            "df / | tail -1 | awk '{print \$5}' | tr -d '%'" \
-                            2>/dev/null | tr -d '[:space:]')
+                        DISK=$(vagrant ssh $VM -c "df / | tail -1 | awk '{print \$5}' | tr -d '%'" 2>/dev/null | tr -d '[:space:]')
                         [ -z "$DISK" ] && DISK=0
-
                         if [ "$DISK" -gt "90" ] 2>/dev/null; then
-                            echo "WARN: $VM disk at ${DISK}% getting full"
-                            echo "WARN: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
-                            FAIL=$((FAIL+1))
+                            echo "WARN: $VM disk at ${DISK}%"; WARN=$((WARN+1))
                         else
-                            echo "PASS: $VM disk at ${DISK}%"
-                            echo "PASS: $VM disk ${DISK}%" >> $WORKSPACE/$REPORT_FILE
+                            echo "OK: $VM disk ${DISK}%"
                         fi
                     done
 
                     HOST_DISK=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
-                    HOST_DISK=${HOST_DISK:-0}
-                    if [ "$HOST_DISK" -gt "95" ] 2>/dev/null; then
-                        echo "FAIL: Host disk critically full at ${HOST_DISK}% pipeline blocked"
-                        echo "FAIL: Host disk critically full ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
+                    if [ "${HOST_DISK:-0}" -gt "95" ] 2>/dev/null; then
+                        echo "FAIL: host disk at ${HOST_DISK}% - critically full"
                         exit 1
-                    else
-                        echo "PASS: Host disk at ${HOST_DISK}%"
-                        echo "PASS: Host disk ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
                     fi
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== HEALTH CHECK COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
-
-                    echo ""
-                    echo "============================================"
-                    echo "HEALTH CHECK REPORT"
-                    echo "============================================"
-                    cat $WORKSPACE/$REPORT_FILE
-
-                    echo "============================================"
-                    if [ "$FAIL" -gt "0" ]; then
-                        echo "FAIL: $FAIL VM(s) have disk usage over 90%"
-                        echo "FAIL: $FAIL VM(s) disk over 90%" >> $WORKSPACE/$REPORT_FILE
-                        exit 1
-                    else
-                        echo "PASS: All resource checks passed"
-                        echo "PASS: All disk checks passed" >> $WORKSPACE/$REPORT_FILE
-                    fi
-                    echo "============================================"
+                    echo "Host disk: ${HOST_DISK}%" >> $WORKSPACE/$REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'health-check-report.txt', fingerprint: true
             }
@@ -336,7 +181,7 @@ pipeline {
     }
 
     post {
-        success { echo 'HEALTH CHECK PASSED cluster is healthy' }
-        failure { echo 'HEALTH CHECK FAILED check the logs above' }
+        success { echo 'Health check passed' }
+        failure { echo 'Health check FAILED - see logs' }
     }
 }

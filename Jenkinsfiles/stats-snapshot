@@ -11,10 +11,6 @@ pipeline {
 
         stage('Host Stats') {
             steps {
-                echo '============================================'
-                echo ' STAGE 1 HOST MACHINE STATS'
-                echo ' Capturing all dashboard values from host'
-                echo '============================================'
                 sh '''
                     echo "SDOS Stats Snapshot $(date)" > $REPORT_FILE
                     echo "============================================" >> $REPORT_FILE
@@ -47,10 +43,6 @@ pipeline {
 
         stage('VM Stats') {
             steps {
-                echo '============================================'
-                echo ' STAGE 2 VM LIST STATS'
-                echo ' Capturing stats from all 5 VMs'
-                echo '============================================'
                 sh '''
                     cd /home/ruairi/fyp-cluster
 
@@ -89,9 +81,7 @@ EOF
                     echo "=== SNAPSHOT COMPLETE: $(date) ===" >> $REPORT_FILE
 
                     echo ""
-                    echo '============================================'
                     echo "STATS SNAPSHOT REPORT"
-                    echo '============================================'
                     cat $REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'stats-snapshot-report.txt', fingerprint: true

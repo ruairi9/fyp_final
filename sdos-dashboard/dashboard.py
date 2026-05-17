@@ -24,16 +24,13 @@ cpu_history = []
 memory_history = []
 disk_history = []
 
-import json as _json_sess
-import os as _os_sess
-
-_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+SESSION_FILE = os.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
 
 def _get_session():
     try:
-        if _os_sess.path.exists(_SESSION_FILE):
-            with open(_SESSION_FILE) as _f:
-                return _json_sess.load(_f)
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE) as f:
+                return json.load(f)
     except Exception:
         pass
     return {}

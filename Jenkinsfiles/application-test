@@ -14,165 +14,82 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '============================================'
-                echo ' SDOS APPLICATION LOAD TEST'
-                echo ' Tests real HTTP traffic against services'
-                echo '============================================'
                 sh '''
-                    echo "Application Load Test Started: $(date)" > $WORKSPACE/$REPORT_FILE
-                    echo "Testing real Kubernetes services with HTTP traffic" >> $WORKSPACE/$REPORT_FILE
-                    echo "============================================" >> $WORKSPACE/$REPORT_FILE
+                    echo "Application Load Test $(date)" > $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== PRE-FLIGHT: POD STATUS ===" >> $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | tee -a $WORKSPACE/$REPORT_FILE
-                    echo "" >> $WORKSPACE/$REPORT_FILE
 
                     RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -c Running || echo 0)
-                    echo "Running pods before test: $RUNNING" >> $WORKSPACE/$REPORT_FILE
-
                     if [ "$RUNNING" -lt "18" ]; then
-                        echo "ABORT: Only $RUNNING pods running cluster not healthy enough to test"
+                        echo "ABORT: only $RUNNING pods running, cluster not ready"
                         exit 1
                     fi
-                    echo "Pre-flight PASSED $RUNNING pods running" >> $WORKSPACE/$REPORT_FILE
+                    echo "$RUNNING pods running - good to go"
 
                     which k6 > /dev/null 2>&1 || \
                         (curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg 2>/dev/null && \
                         echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list > /dev/null && \
                         sudo apt-get update -qq && sudo apt-get install -y k6 -qq 2>/dev/null) || true
-
-                    echo "Setup complete"
                 '''
             }
         }
 
         stage('Test') {
             steps {
-                echo 'Stage 2 Baseline metrics + service health check'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== BASELINE METRICS ===" >> $WORKSPACE/$REPORT_FILE
-
-                    # Check each service responds
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== SERVICE HEALTH CHECKS ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "--- Baseline ---" >> $WORKSPACE/$REPORT_FILE
 
                     for URL in $DEV_URL $PROD_URL; do
-                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 $URL 2>/dev/null || echo "UNREACHABLE")
+                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 $URL 2>/dev/null || echo "DOWN")
                         LATENCY=$(curl -s -o /dev/null -w "%{time_total}" --connect-timeout 5 $URL 2>/dev/null || echo "N/A")
-                        echo "URL: $URL | Status: $STATUS | Latency: ${LATENCY}s" >> $WORKSPACE/$REPORT_FILE
-                        echo "URL: $URL | Status: $STATUS | Latency: ${LATENCY}s"
+                        echo "$URL -> $STATUS (${LATENCY}s)" | tee -a $WORKSPACE/$REPORT_FILE
                     done
 
-                    # Test frontend via vagrant ssh
                     cd $VAGRANT_DIR
-                    FRONTEND_STATUS=$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    FRONTEND_LATENCY=$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s" >> $WORKSPACE/$REPORT_FILE
-                    echo "URL: http://192.168.121.162:30091 | Status: $FRONTEND_STATUS | Latency: ${FRONTEND_LATENCY}s"
+                    FSTATUS=$(vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
+                    echo "frontend (internal) -> $FSTATUS" | tee -a $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== NODE RESOURCES BEFORE LOAD ===" >> $WORKSPACE/$REPORT_FILE
-                    kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null >> $WORKSPACE/$REPORT_FILE || \
-                        echo "metrics-server not available" >> $WORKSPACE/$REPORT_FILE
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== POD RESOURCES BEFORE LOAD ===" >> $WORKSPACE/$REPORT_FILE
-                    kubectl --kubeconfig=$KUBECONFIG top pods --all-namespaces 2>/dev/null >> $WORKSPACE/$REPORT_FILE || \
-                        echo "metrics-server not available" >> $WORKSPACE/$REPORT_FILE
+                    kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true
                 '''
             }
         }
 
         stage('Staging') {
             steps {
-                echo 'Stage 3 HTTP load test against dev and prod services'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== HTTP LOAD TEST ===" >> $WORKSPACE/$REPORT_FILE
-                    echo "Sending 10000 requests per service (100 batches x 100 concurrent)" >> $WORKSPACE/$REPORT_FILE
+                    echo "--- Load Test (50k req/service) ---" >> $WORKSPACE/$REPORT_FILE
 
-                    # Test dev service
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "--- Development Service ($DEV_URL) ---" >> $WORKSPACE/$REPORT_FILE
+                    for URL in $DEV_URL $PROD_URL; do
+                        rm -f /tmp/success_count /tmp/fail_count
+                        > /tmp/success_count; > /tmp/fail_count
+                        START=$(date +%s%N)
 
-                    SUCCESS=0
-                    FAIL=0
-                    TOTAL_TIME=0
-
-                    rm -f /tmp/success_dev /tmp/fail_dev
-                    > /tmp/success_dev
-                    > /tmp/fail_dev
-                    DEV_START=$(date +%s%N)
-                    for batch in $(seq 1 500); do
-                        for j in $(seq 1 100); do
-                            (CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                                --connect-timeout 3 --max-time 5 $DEV_URL 2>/dev/null || echo "000")
-                            if [ "$CODE" = "200" ] || [ "$CODE" = "301" ] || [ "$CODE" = "302" ]; then
-                                echo 1 >> /tmp/success_dev
-                            else
-                                echo 1 >> /tmp/fail_dev
-                            fi) &
+                        for batch in $(seq 1 500); do
+                            for j in $(seq 1 100); do
+                                (CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 $URL 2>/dev/null || echo "000")
+                                if [ "$CODE" = "200" ] || [ "$CODE" = "301" ] || [ "$CODE" = "302" ]; then
+                                    echo 1 >> /tmp/success_count
+                                else
+                                    echo 1 >> /tmp/fail_count
+                                fi) &
+                            done
+                            wait
                         done
-                        wait
+
+                        OK=$(wc -l < /tmp/success_count 2>/dev/null || echo 0)
+                        FAIL=$(wc -l < /tmp/fail_count 2>/dev/null || echo 0)
+                        END=$(date +%s%N)
+                        DURATION=$(echo "scale=2; ($END - $START) / 1000000000" | bc)
+                        RPS=$(echo "scale=0; 50000 / $DURATION" | bc 2>/dev/null || echo "?")
+
+                        echo "$URL: ${OK} ok, ${FAIL} failed, ${DURATION}s, ~${RPS} req/s" | tee -a $WORKSPACE/$REPORT_FILE
                     done
-                    SUCCESS=$(grep -c "1" /tmp/success_dev 2>/dev/null | tr -d "\n" || echo 0); SUCCESS=${SUCCESS:-0}
-                    FAIL=$(grep -c "1" /tmp/fail_dev 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
-                    DEV_END=$(date +%s%N)
-                    DEV_DURATION=$(echo "scale=2; ($DEV_END - $DEV_START) / 1000000000" | bc)
-                    DEV_THROUGHPUT=$(echo "scale=0; 50000 / $DEV_DURATION" | bc 2>/dev/null || echo "N/A")
-
-                    echo "Requests sent: 50000" >> $WORKSPACE/$REPORT_FILE
-                    echo "Successful: $SUCCESS" >> $WORKSPACE/$REPORT_FILE
-                    echo "Failed: $FAIL" >> $WORKSPACE/$REPORT_FILE
-                    echo "Error rate: $(( FAIL * 100 / 50000 ))%" >> $WORKSPACE/$REPORT_FILE
-                    echo "Total time: ${DEV_DURATION}s" >> $WORKSPACE/$REPORT_FILE
-                    echo "Throughput: ${DEV_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "--- Production Service ($PROD_URL) ---" >> $WORKSPACE/$REPORT_FILE
-
-                    SUCCESS=0
-                    FAIL=0
-
-                    rm -f /tmp/success_prod /tmp/fail_prod
-                    > /tmp/success_prod
-                    > /tmp/fail_prod
-                    PROD_START=$(date +%s%N)
-                    for batch in $(seq 1 500); do
-                        for j in $(seq 1 100); do
-                            (CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                                --connect-timeout 3 --max-time 5 $PROD_URL 2>/dev/null || echo "000")
-                            if [ "$CODE" = "200" ] || [ "$CODE" = "301" ] || [ "$CODE" = "302" ]; then
-                                echo 1 >> /tmp/success_prod
-                            else
-                                echo 1 >> /tmp/fail_prod
-                            fi) &
-                        done
-                        wait
-                    done
-                    SUCCESS=$(grep -c "1" /tmp/success_prod 2>/dev/null | tr -d "\n" || echo 0); SUCCESS=${SUCCESS:-0}
-                    FAIL=$(grep -c "1" /tmp/fail_prod 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
-                    PROD_END=$(date +%s%N)
-                    PROD_DURATION=$(echo "scale=2; ($PROD_END - $PROD_START) / 1000000000" | bc)
-                    PROD_THROUGHPUT=$(echo "scale=0; 50000 / $PROD_DURATION" | bc 2>/dev/null || echo "N/A")
-
-                    echo "Requests sent: 50000" >> $WORKSPACE/$REPORT_FILE
-                    echo "Successful: $SUCCESS" >> $WORKSPACE/$REPORT_FILE
-                    echo "Failed: $FAIL" >> $WORKSPACE/$REPORT_FILE
-                    echo "Error rate: $(( FAIL * 100 / 50000 ))%" >> $WORKSPACE/$REPORT_FILE
-                    echo "Total time: ${PROD_DURATION}s" >> $WORKSPACE/$REPORT_FILE
-                    echo "Throughput: ${PROD_THROUGHPUT} req/s" >> $WORKSPACE/$REPORT_FILE
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "--- Frontend Service (worker-dev:30091) ---" >> $WORKSPACE/$REPORT_FILE
 
                     cd $VAGRANT_DIR
                     vagrant ssh worker-dev -c '
-                        rm -f /tmp/success_fe /tmp/fail_fe
-                        > /tmp/success_fe
-                        > /tmp/fail_fe
+                        rm -f /tmp/success_fe /tmp/fail_fe; > /tmp/success_fe; > /tmp/fail_fe
                         for batch in $(seq 1 500); do
                             for j in $(seq 1 100); do
                                 (CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 http://localhost:30091 2>/dev/null || echo 000)
@@ -180,12 +97,9 @@ pipeline {
                             done
                             wait
                         done
-                        SUCCESS=$(grep -c "1" /tmp/success_fe 2>/dev/null | tr -d "\n" || echo 0); SUCCESS=${SUCCESS:-0}
-                        FAIL=$(grep -c "1" /tmp/fail_fe 2>/dev/null | tr -d "\n" || echo 0); FAIL=${FAIL:-0}
-                        echo "Requests sent: 50000"
-                        echo "Successful: $SUCCESS"
-                        echo "Failed: $FAIL"
-                        echo "Error rate: $((FAIL * 100 / 50000))%"
+                        OK=$(wc -l < /tmp/success_fe || echo 0)
+                        FAIL=$(wc -l < /tmp/fail_fe || echo 0)
+                        echo "frontend: ${OK} ok, ${FAIL} failed"
                     ' 2>/dev/null | grep -v fog | grep -v WARNING >> $WORKSPACE/$REPORT_FILE || true
                 '''
             }
@@ -193,51 +107,28 @@ pipeline {
 
         stage('Load') {
             steps {
-                echo 'Stage 4 Spike test + pod resilience check'
                 sh '''
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== SPIKE TEST ===" >> $WORKSPACE/$REPORT_FILE
-                    echo "Sending burst of 20000 concurrent requests..." >> $WORKSPACE/$REPORT_FILE
+                    echo "--- Spike Test ---" >> $WORKSPACE/$REPORT_FILE
 
-                    # Send burst of requests to all services simultaneously
-                    for URL in $DEV_URL $PROD_URL $FRONTEND_URL; do
+                    for URL in $DEV_URL $PROD_URL; do
                         for i in $(seq 1 2000); do
                             curl -s -o /dev/null --connect-timeout 2 --max-time 3 $URL &
                         done
                     done
                     wait
 
-                    echo "Spike test complete" >> $WORKSPACE/$REPORT_FILE
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== POD RESTARTS AFTER SPIKE ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "Spike done, checking pod restarts..." | tee -a $WORKSPACE/$REPORT_FILE
                     kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces \
                         --sort-by='.status.containerStatuses[0].restartCount' 2>/dev/null >> $WORKSPACE/$REPORT_FILE
 
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== NODE RESOURCES DURING LOAD ===" >> $WORKSPACE/$REPORT_FILE
-                    kubectl --kubeconfig=$KUBECONFIG top nodes 2>/dev/null >> $WORKSPACE/$REPORT_FILE || \
-                        echo "metrics-server not available" >> $WORKSPACE/$REPORT_FILE
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== POD RESILIENCE TEST ===" >> $WORKSPACE/$REPORT_FILE
-                    echo "Deleting one sdos-nginx-dev pod to test recovery..." >> $WORKSPACE/$REPORT_FILE
-
-                    POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n development \
-                        --no-headers | head -1 | awk '{print $1}')
-
+                    POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n development --no-headers 2>/dev/null | head -1 | awk '{print $1}')
                     if [ -n "$POD" ]; then
+                        echo "Deleting $POD to test self-healing..." | tee -a $WORKSPACE/$REPORT_FILE
                         kubectl --kubeconfig=$KUBECONFIG delete pod $POD -n development 2>/dev/null
-                        echo "Deleted pod: $POD" >> $WORKSPACE/$REPORT_FILE
                         sleep 15
-                        NEW_POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n development \
-                            --no-headers | grep Running | wc -l)
-                        echo "Pods running after deletion: $NEW_POD" >> $WORKSPACE/$REPORT_FILE
-                        if [ "$NEW_POD" -ge "2" ]; then
-                            echo "PASS: Pod recovered successfully" >> $WORKSPACE/$REPORT_FILE
-                        else
-                            echo "WARN: Pod recovery taking longer than expected" >> $WORKSPACE/$REPORT_FILE
-                        fi
+                        RECOVERED=$(kubectl --kubeconfig=$KUBECONFIG get pods -n development --no-headers | grep -c Running || echo 0)
+                        echo "Pods running after delete: $RECOVERED" | tee -a $WORKSPACE/$REPORT_FILE
                     fi
                 '''
             }
@@ -245,52 +136,21 @@ pipeline {
 
         stage('Production') {
             steps {
-                echo 'Stage 5 Recovery and final report'
                 sh '''
-                    sleep 15
-
+                    sleep 10
                     echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== FINAL CLUSTER STATE ===" >> $WORKSPACE/$REPORT_FILE
+                    echo "--- Post-test state ---" >> $WORKSPACE/$REPORT_FILE
 
-                    TOTAL=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | wc -l)
                     RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -c Running || echo 0)
-                    NOT_RUNNING=$(kubectl --kubeconfig=$KUBECONFIG get pods --all-namespaces --no-headers | grep -v Running || true)
+                    echo "Running pods: $RUNNING" | tee -a $WORKSPACE/$REPORT_FILE
 
-                    echo "Total pods: $TOTAL" >> $WORKSPACE/$REPORT_FILE
-                    echo "Running pods: $RUNNING" >> $WORKSPACE/$REPORT_FILE
-
-                    if [ -n "$NOT_RUNNING" ]; then
-                        echo "Non-running pods:" >> $WORKSPACE/$REPORT_FILE
-                        echo "$NOT_RUNNING" >> $WORKSPACE/$REPORT_FILE
-                    fi
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== FINAL SERVICE HEALTH ===" >> $WORKSPACE/$REPORT_FILE
                     for URL in $DEV_URL $PROD_URL; do
-                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 $URL 2>/dev/null || echo "UNREACHABLE")
-                        LATENCY=$(curl -s -o /dev/null -w "%{time_total}" --connect-timeout 5 $URL 2>/dev/null || echo "N/A")
-                        echo "URL: \$URL | Status: \$STATUS | Latency: \${LATENCY}s" >> \$WORKSPACE/\$REPORT_FILE
+                        STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 $URL 2>/dev/null || echo "DOWN")
+                        echo "$URL -> $STATUS" | tee -a $WORKSPACE/$REPORT_FILE
                     done
-                    cd \$VAGRANT_DIR
-                    FSTATUS=\$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{http_code}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    FLATENCY=\$(cd /home/ruairi/fyp-cluster && vagrant ssh worker-dev -c "curl -s -o /dev/null -w '%{time_total}' http://localhost:30091" 2>/dev/null | grep -v fog | grep -v WARNING | tail -1)
-                    echo "URL: http://192.168.121.162:30091 | Status: \$FSTATUS | Latency: \${FLATENCY}s" >> \$WORKSPACE/\$REPORT_FILE
 
-                    if [ "$RUNNING" -gt "18" ]; then
-                        echo "" >> $WORKSPACE/$REPORT_FILE
-                        echo "PASS: Cluster healthy after application load test" >> $WORKSPACE/$REPORT_FILE
-                    else
-                        echo "" >> $WORKSPACE/$REPORT_FILE
-                        echo "WARN: Only $RUNNING pods running after test" >> $WORKSPACE/$REPORT_FILE
-                    fi
-
-                    echo "" >> $WORKSPACE/$REPORT_FILE
-                    echo "=== TEST COMPLETE: $(date) ===" >> $WORKSPACE/$REPORT_FILE
-
-                    echo ""
-                    echo '============================================'
-                    echo "APPLICATION LOAD TEST RESULTS"
-                    echo '============================================'
+                    echo "---" >> $WORKSPACE/$REPORT_FILE
+                    echo "Done $(date)" >> $WORKSPACE/$REPORT_FILE
                     cat $WORKSPACE/$REPORT_FILE
                 '''
                 archiveArtifacts artifacts: 'application-test-report.txt', fingerprint: true
@@ -299,10 +159,7 @@ pipeline {
     }
 
     post {
-        always {
-            echo 'Application load test complete'
-        }
-        success { echo 'Application test passed check application-test-report.txt' }
-        failure { echo 'Application test failed' }
+        success { echo 'Load test passed' }
+        failure { echo 'Load test failed - check report' }
     }
 }

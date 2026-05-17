@@ -15,13 +15,9 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '============================================'
-                echo ' STAGE 1 BUILD'
-                echo ' Building Flask backend Docker image'
-                echo '============================================'
                 sh '''
                     echo "E2E Integration Test Report $(date)" > $REPORT_FILE
-                    echo "============================================" >> $REPORT_FILE
+                    echo "---" >> $REPORT_FILE
                     mkdir -p /tmp/sdos-e2e/backend
 
                     cat > /tmp/sdos-e2e/backend/app.py <<EOF
@@ -75,27 +71,20 @@ EXPOSE 5000
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
 EOF
 
-                    docker login 192.168.121.50:30500 -u admin -p passadmin
+                    docker login $REGISTRY -u admin -p passadmin
                     docker build -t $REGISTRY/$BACKEND_IMG:$BACKEND_TAG /tmp/sdos-e2e/backend/
                     docker push $REGISTRY/$BACKEND_IMG:$BACKEND_TAG
-                    echo "PASS: Backend image built and pushed to $REGISTRY"
                 '''
             }
         }
 
         stage('Deploy') {
             steps {
-                echo '============================================'
-                echo ' STAGE 2 DEPLOY'
-                echo ' Deploying Flask backend + nginx frontend'
-                echo ' to the integration namespace'
-                echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG create namespace $NAMESPACE --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
 
-                    kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend  -n $NAMESPACE --ignore-not-found=true || true
-                    kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend -n $NAMESPACE --ignore-not-found=true || true
-                    kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod         -n $NAMESPACE --ignore-not-found=true || true
+                    kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend sdos-frontend -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
+                    kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
                     sleep 5
 
                     cat > /tmp/sdos-e2e/backend-deployment.yaml <<EOF
@@ -106,7 +95,6 @@ metadata:
   namespace: $NAMESPACE
   labels:
     app: sdos-backend
-    tier: backend
 spec:
   replicas: 2
   selector:
@@ -116,7 +104,6 @@ spec:
     metadata:
       labels:
         app: sdos-backend
-        tier: backend
     spec:
       imagePullSecrets:
       - name: registry-creds
@@ -163,7 +150,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: sdos-frontend-config
-  namespace: integration
+  namespace: $NAMESPACE
 data:
   default.conf: |
     server {
@@ -173,7 +160,7 @@ data:
             return 200 "SDOS Frontend OK";
         }
         location /api/ {
-            proxy_pass http://sdos-backend.integration.svc.cluster.local:5000;
+            proxy_pass http://sdos-backend.$NAMESPACE.svc.cluster.local:5000;
             proxy_connect_timeout 5s;
             proxy_read_timeout 10s;
         }
@@ -183,10 +170,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sdos-frontend
-  namespace: integration
-  labels:
-    app: sdos-frontend
-    tier: frontend
+  namespace: $NAMESPACE
 spec:
   replicas: 1
   selector:
@@ -196,7 +180,6 @@ spec:
     metadata:
       labels:
         app: sdos-frontend
-        tier: frontend
     spec:
       containers:
       - name: nginx
@@ -226,7 +209,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sdos-frontend
-  namespace: integration
+  namespace: $NAMESPACE
 spec:
   type: NodePort
   selector:
@@ -234,7 +217,7 @@ spec:
   ports:
   - port: 80
     targetPort: 80
-    nodePort: 30091
+    nodePort: $FRONTEND_PORT
 EOF
 
                     kubectl --kubeconfig=$KUBECONFIG create secret docker-registry registry-creds \
@@ -247,13 +230,8 @@ EOF
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-e2e/backend-deployment.yaml
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-e2e/frontend-deployment.yaml
 
-                    echo "Waiting for backend rollout..."
                     kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-backend -n $NAMESPACE --timeout=120s
-
-                    echo "Waiting for frontend rollout..."
                     kubectl --kubeconfig=$KUBECONFIG rollout status deployment/sdos-frontend -n $NAMESPACE --timeout=300s
-
-                    echo "All pods in integration namespace:"
                     kubectl --kubeconfig=$KUBECONFIG get pods -n $NAMESPACE
                     sleep 10
                 '''
@@ -261,141 +239,61 @@ EOF
         }
 
         stage('Integration Tests') {
+            // spin up a curl pod inside the cluster to test the full chain
             steps {
-                echo '============================================'
-                echo ' STAGE 3 INTEGRATION TESTS'
-                echo ' Test pod runs inside the cluster'
-                echo ' Tests the full frontend → backend chain'
-                echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG run e2e-test-pod \
                         --image=curlimages/curl:latest \
                         --restart=Never \
                         --namespace=$NAMESPACE \
                         -- sh -c '
-                            echo "=== E2E Integration Tests ==="
-                            echo "Testing frontend -> backend communication"
-                            echo "Waiting 15s for DNS and services to be ready..."
                             sleep 15
-                            echo ""
-                            PASS=0
-                            FAIL=0
 
-                            echo "Test 1: Backend /api/health via cluster DNS"
-                            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                                http://sdos-backend.integration.svc.cluster.local:5000/api/health \
-                                --connect-timeout 10)
-                            if [ "$CODE" = "200" ]; then
-                                echo "  PASS: Backend health check returned 200"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: Backend returned $CODE"
-                                FAIL=$((FAIL+1))
-                            fi
+                            PASS=0; FAIL=0
+                            BACKEND="http://sdos-backend.integration.svc.cluster.local:5000"
+                            FRONTEND="http://sdos-frontend.integration.svc.cluster.local:80"
 
-                            echo "Test 2: Backend /api/health returns healthy status"
-                            BODY=$(curl -s \
-                                http://sdos-backend.integration.svc.cluster.local:5000/api/health \
-                                --connect-timeout 10)
-                            if echo "$BODY" | grep -q "healthy"; then
-                                echo "  PASS: Backend returned healthy status"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: Backend did not return healthy status"
-                                FAIL=$((FAIL+1))
-                            fi
+                            CODE=$(curl -s -o /dev/null -w "%{http_code}" $BACKEND/api/health --connect-timeout 10)
+                            if [ "$CODE" = "200" ]; then PASS=$((PASS+1)); echo "PASS: backend /api/health"; else FAIL=$((FAIL+1)); echo "FAIL: backend health got $CODE"; fi
 
-                            echo "Test 3: Backend /api/message endpoint"
-                            BODY=$(curl -s \
-                                http://sdos-backend.integration.svc.cluster.local:5000/api/message \
-                                --connect-timeout 10)
-                            if echo "$BODY" | grep -q "Flask backend"; then
-                                echo "  PASS: /api/message returned expected content"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: /api/message unexpected response"
-                                FAIL=$((FAIL+1))
-                            fi
+                            BODY=$(curl -s $BACKEND/api/health --connect-timeout 10)
+                            echo "$BODY" | grep -q "healthy" && PASS=$((PASS+1)) && echo "PASS: healthy in response" || { FAIL=$((FAIL+1)); echo "FAIL: no healthy in response"; }
 
-                            echo "Test 4: Backend /api/status endpoint"
-                            BODY=$(curl -s \
-                                http://sdos-backend.integration.svc.cluster.local:5000/api/status \
-                                --connect-timeout 10)
-                            if echo "$BODY" | grep -q "connected"; then
-                                echo "  PASS: /api/status returned expected content"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: /api/status unexpected response"
-                                FAIL=$((FAIL+1))
-                            fi
+                            BODY=$(curl -s $BACKEND/api/message --connect-timeout 10)
+                            echo "$BODY" | grep -q "Flask backend" && PASS=$((PASS+1)) && echo "PASS: /api/message" || { FAIL=$((FAIL+1)); echo "FAIL: /api/message"; }
 
-                            echo "Test 5: Frontend serves HTML page"
-                            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                                http://sdos-frontend.integration.svc.cluster.local:80 \
-                                --connect-timeout 10)
-                            if [ "$CODE" = "200" ]; then
-                                echo "  PASS: Frontend returned 200"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: Frontend returned $CODE"
-                                FAIL=$((FAIL+1))
-                            fi
+                            BODY=$(curl -s $BACKEND/api/status --connect-timeout 10)
+                            echo "$BODY" | grep -q "connected" && PASS=$((PASS+1)) && echo "PASS: /api/status" || { FAIL=$((FAIL+1)); echo "FAIL: /api/status"; }
 
-                            echo "Test 6: Frontend /api/health proxies to Flask backend"
-                            BODY=$(curl -s \
-                                http://sdos-frontend.integration.svc.cluster.local:80/api/health \
-                                --connect-timeout 10)
-                            if echo "$BODY" | grep -q "healthy"; then
-                                echo "  PASS: Frontend correctly proxied to Flask backend"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: Frontend did not proxy to backend"
-                                FAIL=$((FAIL+1))
-                            fi
+                            CODE=$(curl -s -o /dev/null -w "%{http_code}" $FRONTEND/ --connect-timeout 10)
+                            if [ "$CODE" = "200" ]; then PASS=$((PASS+1)); echo "PASS: frontend serves page"; else FAIL=$((FAIL+1)); echo "FAIL: frontend got $CODE"; fi
 
-                            echo "Test 7: End-to-end response time"
-                            TIME=$(curl -s -o /dev/null -w "%{time_total}" \
-                                http://sdos-frontend.integration.svc.cluster.local:80/api/message \
-                                --connect-timeout 10)
-                            if awk "BEGIN { exit !($TIME < 2.0) }"; then
-                                echo "  PASS: E2E response time ${TIME}s (under 2s)"
-                                PASS=$((PASS+1))
-                            else
-                                echo "  FAIL: E2E response time ${TIME}s (too slow)"
-                                FAIL=$((FAIL+1))
-                            fi
+                            BODY=$(curl -s $FRONTEND/api/health --connect-timeout 10)
+                            echo "$BODY" | grep -q "healthy" && PASS=$((PASS+1)) && echo "PASS: frontend proxies to backend" || { FAIL=$((FAIL+1)); echo "FAIL: proxy broken"; }
 
-                            echo ""
-                            echo "============================================"
-                            echo "E2E Integration Tests: $PASS passed, $FAIL failed"
-                            echo "============================================"
+                            TIME=$(curl -s -o /dev/null -w "%{time_total}" $FRONTEND/api/message --connect-timeout 10)
+                            if awk "BEGIN { exit !($TIME < 2.0) }"; then PASS=$((PASS+1)); echo "PASS: latency ${TIME}s"; else FAIL=$((FAIL+1)); echo "FAIL: too slow ${TIME}s"; fi
 
-                            if [ "$FAIL" -gt "0" ]; then
-                                exit 1
-                            fi
+                            echo ""; echo "Results: $PASS passed, $FAIL failed"
+                            [ "$FAIL" -gt "0" ] && exit 1 || exit 0
                         '
 
-                    kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Succeeded --timeout=120s 2>/dev/null ||                     kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod                         -n $NAMESPACE --for=jsonpath="{.status.phase}"=Failed --timeout=120s 2>/dev/null || true
-                    kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null || true
+                    kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod \
+                        -n $NAMESPACE --for=jsonpath="{.status.phase}"=Succeeded --timeout=120s 2>/dev/null || \
+                    kubectl --kubeconfig=$KUBECONFIG wait pod/e2e-test-pod \
+                        -n $NAMESPACE --for=jsonpath="{.status.phase}"=Failed --timeout=120s 2>/dev/null || true
+
+                    kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null | tee -a $REPORT_FILE
 
                     EXIT_CODE=$(kubectl --kubeconfig=$KUBECONFIG get pod e2e-test-pod \
                         -n $NAMESPACE \
                         -o jsonpath="{.status.containerStatuses[0].state.terminated.exitCode}" 2>/dev/null || echo "0")
                     kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod -n $NAMESPACE --ignore-not-found=true
 
-                    if [ "$EXIT_CODE" != "0" ] && [ "$EXIT_CODE" != "" ]; then
-                        echo "FAIL: Integration test pod failed"
+                    if [ "$EXIT_CODE" != "0" ] && [ -n "$EXIT_CODE" ]; then
+                        echo "Tests failed (exit $EXIT_CODE)"
                         exit 1
                     fi
-
-                    echo ""
-                    echo "============================================"
-                    echo "  Frontend: http://192.168.121.20:$FRONTEND_PORT"
-                    echo "  Backend:  internal only (cluster DNS)"
-                    echo "============================================"
-                    kubectl --kubeconfig=$KUBECONFIG logs e2e-test-pod -n $NAMESPACE 2>/dev/null >> $REPORT_FILE || true
-                    echo "" >> $REPORT_FILE
-                    echo "=== TEST COMPLETE: $(date) ===" >> $REPORT_FILE
                 '''
             }
         }
@@ -404,23 +302,15 @@ EOF
     post {
         always {
             archiveArtifacts artifacts: 'e2e-test-report.txt', fingerprint: true, allowEmptyArchive: true
-        }
-        success {
-            echo 'E2E integration tests passed - frontend talks to backend correctly!'
+            sh 'rm -rf /tmp/sdos-e2e || true'
         }
         failure {
             sh '''
-                echo "Pipeline failed - cleaning up..."
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend         -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-frontend         -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete service    sdos-backend         -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete service    sdos-frontend         -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete configmap  sdos-frontend-config -n $NAMESPACE --ignore-not-found=true || true
-                kubectl --kubeconfig=$KUBECONFIG delete pod        e2e-test-pod         -n $NAMESPACE --ignore-not-found=true || true
+                kubectl --kubeconfig=$KUBECONFIG delete deployment sdos-backend sdos-frontend -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
+                kubectl --kubeconfig=$KUBECONFIG delete service sdos-backend sdos-frontend -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
+                kubectl --kubeconfig=$KUBECONFIG delete configmap sdos-frontend-config -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
+                kubectl --kubeconfig=$KUBECONFIG delete pod e2e-test-pod -n $NAMESPACE --ignore-not-found=true 2>/dev/null || true
             '''
-        }
-        always {
-            sh 'rm -rf /tmp/sdos-e2e || true'
         }
     }
 }

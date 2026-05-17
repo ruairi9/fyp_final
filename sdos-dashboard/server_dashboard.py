@@ -7,16 +7,13 @@ import signal
 import sys
 import time
 
-import json as _json_sess
-import os as _os_sess
-
-_SESSION_FILE = _os_sess.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
+SESSION_FILE = os.path.expanduser('~/fyp-cluster/sdos-dashboard/.sdos_session')
 
 def _get_session():
     try:
-        if _os_sess.path.exists(_SESSION_FILE):
-            with open(_SESSION_FILE) as _f:
-                return _json_sess.load(_f)
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE) as f:
+                return json.load(f)
     except Exception:
         pass
     return {}
@@ -185,9 +182,9 @@ def get_host_stats():
                     continue
                 if re.match(r'^(nvme|sd|vd|hd)', parts[0]) and len(parts) >= 12:
                     try:
-                        disk_iops       = round(float(parts[1]) + float(parts[7]), 1)   # r/s + w/s
-                        disk_throughput = round((float(parts[2]) + float(parts[8])) / 1024, 2)  # rkB/s + wkB/s → MB/s
-                        disk_latency    = round(float(parts[5]), 2)   # r_await
+                        disk_iops       = round(float(parts[1]) + float(parts[7]), 1)
+                        disk_throughput = round((float(parts[2]) + float(parts[8])) / 1024, 2)
+                        disk_latency    = round(float(parts[5]), 2)
                     except Exception as e:
                         print(f"iostat parse error: {e}")
                     break

@@ -14,11 +14,6 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '============================================'
-                echo ' SDOS MAX LOAD TEST All 5 VMs'
-                echo ' Target: 80% CPU + 75% RAM'
-                echo ' Safety cut-off: CPU>85% or RAM>80%'
-                echo '============================================'
                 sh """
                     echo "Max Load Test Started: \$(date)" > \$WORKSPACE/\$REPORT_FILE
                     echo "Target Load: 80% CPU, 75% RAM" >> \$WORKSPACE/\$REPORT_FILE
@@ -141,7 +136,6 @@ METRICS
                     echo "" >> \$WORKSPACE/\$REPORT_FILE
                     echo "=== COMBINED STRESS 80% CPU + 70% RAM (per VM) ===" >> \$WORKSPACE/\$REPORT_FILE
 
-                    # Write combined stress script to each VM then run it
                     for VM in control-plane worker-dev worker-prod worker-cicd worker-monitoring; do
                         vagrant ssh \$VM -c "printf '#!/bin/sh\\nstress-ng --cpu 2 --cpu-method matrixprod --vm 2 --vm-bytes 80%% --vm-keep --io 4 --hdd 2 --hdd-bytes 256M --cache 4 --timeout 120s > /tmp/stress.log 2>&1\\n' > /tmp/run_stress.sh; chmod +x /tmp/run_stress.sh; nohup /tmp/run_stress.sh > /dev/null 2>&1 &" 2>/dev/null
                     done

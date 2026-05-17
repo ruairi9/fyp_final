@@ -14,11 +14,6 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '============================================'
-                echo ' SDOS SAFE LOAD TEST All 5 VMs'
-                echo ' Target: 70% CPU + 70% RAM'
-                echo ' Safety cut-off: CPU>85% or RAM>85%'
-                echo '============================================'
                 sh """
                     echo "Safe Load Test Started: \$(date)" > \$WORKSPACE/\$REPORT_FILE
                     echo "Target Load: 70% CPU, 70% RAM" >> \$WORKSPACE/\$REPORT_FILE

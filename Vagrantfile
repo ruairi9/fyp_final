@@ -5,15 +5,13 @@ RUN_PIPELINE = <<-'PIPELINE'
 pipeline {
     agent any
     stages {
-        stage('Build')      { steps { echo 'Building...';      sleep 6 } }
-        stage('Test')       { steps { echo 'Testing...';       sleep 6 } }
-        stage('Staging')    { steps { echo 'Staging...';       sleep 6 } }
-        stage('Load')       { steps { echo 'Load testing...';  sleep 6 } }
-        stage('Production') { steps { echo 'Deploying...';     sleep 6 } }
+        stage('Build')   { steps { echo 'Building...';  sleep 8 } }
+        stage('Test')    { steps { echo 'Testing...';   sleep 5 } }
+        stage('Deploy')  { steps { echo 'Deploying...'; sleep 10 } }
     }
     post {
-        success { echo 'Pipeline completed successfully' }
-        failure { echo 'Pipeline failed' }
+        success { echo 'Done' }
+        failure { echo 'Failed' }
     }
 }
 PIPELINE
@@ -22,15 +20,10 @@ DEMO_PIPELINE = <<-'PIPELINE'
 pipeline {
     agent any
     stages {
-        stage('Build')      { steps { echo 'Building demo...';    sleep 6 } }
-        stage('Test')       { steps { echo 'Testing demo...';     sleep 6 } }
-        stage('Staging')    { steps { echo 'Staging demo...';     sleep 6 } }
-        stage('Load')       { steps { echo 'Load testing...';     sleep 6 } }
-        stage('Production') { steps { echo 'Deploying demo...';   sleep 6 } }
-    }
-    post {
-        success { echo 'Demo pipeline completed' }
-        failure { echo 'Demo pipeline failed' }
+        stage('Checkout') { steps { echo 'Pulling code...'; sleep 3 } }
+        stage('Build')    { steps { echo 'Compiling...';    sleep 7 } }
+        stage('Test')     { steps { echo 'Running tests...'; sleep 5 } }
+        stage('Push')     { steps { echo 'Pushing image...'; sleep 4 } }
     }
 }
 PIPELINE
@@ -39,15 +32,12 @@ HEALTH_CHECK_PIPELINE = <<-'PIPELINE'
 pipeline {
     agent any
     stages {
-        stage('Build')      { steps { echo 'Starting health check...'; sleep 6 } }
-        stage('Test')       { steps { echo 'Checking services...';     sleep 6 } }
-        stage('Staging')    { steps { echo 'Checking staging env...';  sleep 6 } }
-        stage('Load')       { steps { echo 'Checking load...';         sleep 6 } }
-        stage('Production') { steps { echo 'All systems healthy!';     sleep 6 } }
+        stage('Check VMs')     { steps { echo 'Pinging VMs...';     sleep 10 } }
+        stage('Check K8s')     { steps { echo 'Checking nodes...';  sleep 5 } }
+        stage('Check Services'){ steps { echo 'Hitting endpoints...'; sleep 8 } }
     }
     post {
-        success { echo 'Cluster health check passed' }
-        failure { echo 'Health check failed' }
+        failure { echo 'Something is down' }
     }
 }
 PIPELINE

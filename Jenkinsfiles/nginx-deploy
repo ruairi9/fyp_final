@@ -16,10 +16,6 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo '============================================'
-                echo ' STAGE 1 BUILD'
-                echo ' Creating nginx Kubernetes manifests'
-                echo '============================================'
                 sh '''
                     mkdir -p /tmp/sdos-nginx
 
@@ -186,10 +182,6 @@ EOF
 
         stage('Test') {
             steps {
-                echo '============================================'
-                echo ' STAGE 2 TEST'
-                echo ' Deploying nginx to worker-dev'
-                echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG create namespace development --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/dev-deployment.yaml
@@ -214,11 +206,6 @@ EOF
 
         stage('Staging') {
             steps {
-                echo '============================================'
-                echo ' STAGE 3 STAGING'
-                echo ' Deploying to dedicated staging namespace'
-                echo ' Running test pod inside Kubernetes cluster'
-                echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG create namespace staging --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/stg-deployment.yaml
@@ -299,11 +286,7 @@ EOF
 
         stage('Load') {
             steps {
-                echo '============================================'
-                echo ' STAGE 4 LOAD TEST'
-                echo ' Running load test with response time metrics'
                 echo ' Gates production if avg response time > 3s'
-                echo '============================================'
                 sh '''
                     echo "Running load test against http://192.168.121.20:30081"
                     echo "Sending 50 requests..."
@@ -353,11 +336,6 @@ EOF
 
         stage('Production') {
             steps {
-                echo '============================================'
-                echo ' STAGE 5 PRODUCTION'
-                echo ' Deploying nginx to worker-production'
-                echo ' Running test pod inside Kubernetes cluster'
-                echo '============================================'
                 sh '''
                     kubectl --kubeconfig=$KUBECONFIG create namespace production --dry-run=client -o yaml | kubectl --kubeconfig=$KUBECONFIG apply -f -
                     kubectl --kubeconfig=$KUBECONFIG apply -f /tmp/sdos-nginx/prod-deployment.yaml

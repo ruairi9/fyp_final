@@ -11,87 +11,65 @@ pipeline {
 
         stage('Setup') {
             steps {
-                echo '============================================'
-                echo ' STAGE 1 SETUP'
-                echo ' Installing Trivy scanner'
-                echo '============================================'
                 sh '''
-                    echo "Security Scan Started: $(date)" > $REPORT_FILE
-                    echo "============================================" >> $REPORT_FILE
-
+                    echo "Security Scan $(date)" > $REPORT_FILE
                     export PATH=$PATH:/home/ruairi/.local/bin
                     if ! which trivy > /dev/null 2>&1; then
-                        echo "Installing Trivy..."
+                        echo "Installing trivy..."
                         mkdir -p /home/ruairi/.local/bin
                         curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /home/ruairi/.local/bin
                     fi
-                    export PATH=$PATH:/home/ruairi/.local/bin
-
                     trivy --version
-                    echo "PASS: Trivy ready"
                 '''
             }
         }
 
         stage('Scan Images') {
             steps {
-                echo '============================================'
-                echo ' STAGE 2 IMAGE SCAN'
-                echo ' Scanning Docker images for vulnerabilities'
-                echo '============================================'
                 sh '''
                     export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
-                    echo "=== DOCKER IMAGE SCANS ===" >> $REPORT_FILE
 
-                    echo "Scanning nginx:1.25.3..."
-                    echo "--- nginx:1.25.3 ---" >> $REPORT_FILE
-                    trivy image --severity HIGH,CRITICAL --no-progress nginx:1.25.3 2>/dev/null >> $REPORT_FILE || true
+                    for IMG in nginx:1.25.3 python:3.11-alpine; do
+                        echo "Scanning $IMG..."
+                        echo "--- $IMG ---" >> $REPORT_FILE
+                        trivy image --severity HIGH,CRITICAL --no-progress $IMG 2>/dev/null >> $REPORT_FILE || true
+                        echo "" >> $REPORT_FILE
+                    done
 
-                    echo "Scanning python:3.11-alpine..."
-                    echo "" >> $REPORT_FILE
-                    echo "--- python:3.11-alpine ---" >> $REPORT_FILE
-                    trivy image --severity HIGH,CRITICAL --no-progress python:3.11-alpine 2>/dev/null >> $REPORT_FILE || true
-
-                    echo "Scanning sdos-backend from private registry..."
-                    echo "" >> $REPORT_FILE
-                    echo "--- sdos-backend (private registry) ---" >> $REPORT_FILE
-                    trivy image --severity HIGH,CRITICAL --no-progress \
-                        --insecure \
-                        $REGISTRY/sdos-backend:latest 2>/dev/null >> $REPORT_FILE || echo "sdos-backend not found in registry skipping" >> $REPORT_FILE
-
-                    echo "Image scans complete"
+                    echo "Scanning sdos-backend..."
+                    echo "--- sdos-backend ---" >> $REPORT_FILE
+                    trivy image --severity HIGH,CRITICAL --no-progress --insecure \
+                        $REGISTRY/sdos-backend:latest 2>/dev/null >> $REPORT_FILE \
+                        || echo "not in registry, skipping" >> $REPORT_FILE
                 '''
             }
         }
 
         stage('Scan K8s') {
             steps {
-                echo '============================================'
-                echo ' STAGE 3 KUBERNETES SCAN'
-                echo ' Scanning cluster for misconfigurations'
-                echo '============================================'
                 sh '''
                     export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
-                    echo "=== KUBERNETES CLUSTER SCAN ===" >> $REPORT_FILE
-
+                    echo "--- cluster scan ---" >> $REPORT_FILE
                     trivy k8s --severity HIGH,CRITICAL --no-progress \
-                        --kubeconfig $KUBECONFIG \
-                        --report summary \
+                        --kubeconfig $KUBECONFIG --report summary \
                         cluster 2>/dev/null >> $REPORT_FILE || true
 
-                    echo "Kubernetes scan complete"
+                    echo "" >> $REPORT_FILE
+                    echo "--- config files ---" >> $REPORT_FILE
+                    cd /home/ruairi/fyp-cluster
+                    [ -f "Dockerfile" ] && trivy config --severity HIGH,CRITICAL --no-progress Dockerfile 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true
+                    find . -name "*.yaml" -not -path "*/.*" 2>/dev/null | head -5 | while read f; do
+                        trivy config --severity HIGH,CRITICAL --no-progress "$f" 2>/dev/null >> $WORKSPACE/$REPORT_FILE || true
+                    done
                 '''
             }
         }
 
+
         stage('Scan Config') {
             steps {
-                echo '============================================'
-                echo ' STAGE 4 CONFIG SCAN'
-                echo ' Scanning Dockerfiles and K8s manifests'
-                echo '============================================'
                 sh '''
                     export PATH=$PATH:/home/ruairi/.local/bin
                     echo "" >> $REPORT_FILE
@@ -114,34 +92,17 @@ pipeline {
                 '''
             }
         }
-
         stage('Report') {
             steps {
-                echo '============================================'
-                echo ' STAGE 5 SECURITY REPORT'
-                echo ' Summarising all findings'
-                echo '============================================'
                 sh '''
-                    echo "" >> $REPORT_FILE
-                    echo "=== SCAN COMPLETE: $(date) ===" >> $REPORT_FILE
-
                     CRITICAL=$(grep -c "CRITICAL" $REPORT_FILE || echo 0)
                     HIGH=$(grep -c "HIGH" $REPORT_FILE || echo 0)
-
                     echo "" >> $REPORT_FILE
-                    echo "=== SUMMARY ===" >> $REPORT_FILE
-                    echo "CRITICAL findings: $CRITICAL" >> $REPORT_FILE
-                    echo "HIGH findings:     $HIGH" >> $REPORT_FILE
+                    echo "CRITICAL: $CRITICAL, HIGH: $HIGH" >> $REPORT_FILE
+                    echo "Done $(date)" >> $REPORT_FILE
 
-                    echo ""
-                    echo '============================================'
-                    echo "SECURITY SCAN REPORT"
-                    echo '============================================'
-                    echo "CRITICAL findings: $CRITICAL"
-                    echo "HIGH findings:     $HIGH"
-                    echo ""
-                    echo "Full report saved to artifacts"
-                    echo "============================================"
+                    echo "Results: $CRITICAL critical, $HIGH high"
+                    echo "(full report in artifacts)"
                 '''
                 archiveArtifacts artifacts: 'security-scan-report.txt', fingerprint: true
             }
@@ -149,10 +110,7 @@ pipeline {
     }
 
     post {
-        success { echo 'Security scan complete check security-scan-report.txt in artifacts' }
-        failure { echo 'Security scan failed check the logs above' }
-        always {
-            sh 'echo "Scan finished: $(date)"'
-        }
+        success { echo 'Scan done - check report' }
+        failure { echo 'Scan failed' }
     }
 }
