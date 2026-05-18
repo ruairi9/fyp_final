@@ -2,9 +2,6 @@
 set -e
 cd ~/fyp-cluster
 
-echo '============================================'
-echo "SDOS Host Setup Script"
-echo '============================================'
 
 if [ ! -f ./jenkins_agent.pub ]; then
     echo "jenkins_agent.pub not found generating new SSH key..."
@@ -44,17 +41,14 @@ fi
 if [ -f ./jenkins-info.txt ]; then
     echo ""
     echo '============================================'
-    echo "Jenkins is ready!"
+    echo "Jenkins is ready"
     cat ./jenkins-info.txt
     echo '============================================'
 fi
 
 echo ""
-echo '============================================'
-echo "Host setup complete!"
-echo "Next steps:"
+echo "Done."
 echo "	1. Start SDOS: cd sdos-dashboard && bash run-all.sh"
 echo "  2. Open: http://localhost:5000"
 echo "  3. Jenkins: http://192.168.121.40:32080"
 echo "  4. Add your GitHub token to developer_workspace.py"
-echo '============================================'

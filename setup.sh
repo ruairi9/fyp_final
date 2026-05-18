@@ -4,10 +4,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUBECONFIG="$SCRIPT_DIR/k3s.yaml"
 EXPECTED_VMS=5
-
-echo "============================================"
-echo " SDOS Project Setup"
-echo "============================================"
 echo ""
 
 if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
@@ -48,18 +44,8 @@ sudo usermod -aG libvirt $USER
 sudo usermod -aG docker $USER
 
 if ! groups | grep -q docker || ! groups | grep -q libvirt; then
-    echo ""
-    echo "============================================"
-    echo " ACTION REQUIRED"
-    echo "============================================"
-    echo " You have been added to the docker and"
-    echo " libvirt groups but you must log out and"
-    echo " log back in for this to take effect."
-    echo ""
-    echo " After logging back in run:"
-    echo "   bash setup.sh"
-    echo "============================================"
-    exit 0
+    echo ""    echo " log back in for this to take effect."
+    echo ""    exit 0
 fi
 
 echo ""
@@ -138,19 +124,8 @@ for PORT in 5000 8080 9000 7000 6001; do
     fi
 done
 
-echo ""
-echo "============================================"
-echo " SDOS Setup Complete!"
-echo "============================================"
-echo " Home:      http://localhost:5000"
-echo " Dashboard: http://localhost:8080"
-echo " Server:    http://localhost:9000"
-echo " Pipeline:  http://localhost:7000"
-echo " Workspace: http://localhost:6001"
-echo "============================================"
-if [ "$ALL_UP" = false ]; then
+echo ""if [ "$ALL_UP" = false ]; then
     echo ""
     echo "NOTE: Some services not reachable yet."
     echo "Wait 30 seconds and try the URLs above."
 fi
-echo "============================================"
